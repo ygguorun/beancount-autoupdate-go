@@ -61,4 +61,5 @@ type PendingTransaction struct {
 	EditingPostingIndex int
 	AvailableAccounts   []string
 	AccountPage         int
+	LastMessageID       int // 最后一条消息的ID，用于编辑消息
 }

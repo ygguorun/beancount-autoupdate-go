@@ -486,7 +486,14 @@ func (b *Bot) handlePostingAmountInput(userID int, text string) {
 		),
 	)
 
-	b.sendMessage(userID, message, keyboard)
+	// 使用 EditMessageText 而不是发送新消息
+	if data.LastMessageID > 0 {
+		msg := tgbotapi.NewEditMessageText(int64(userID), data.LastMessageID, message)
+		msg.ReplyMarkup = &keyboard
+		b.botAPI.Request(msg)
+	} else {
+		b.sendMessage(userID, message, keyboard)
+	}
 }
 
 // handleNarrationInput 处理描述输入
@@ -500,7 +507,8 @@ func (b *Bot) handleNarrationInput(userID int, text string) {
 	}
 
 	data.Narration = text
-	b.showTransactionPreview(userID, 0)
+	// 使用 LastMessageID 来编辑消息，而不是发送新消息
+	b.showTransactionPreview(userID, data.LastMessageID)
 }
 
 // handlePayeeInput 处理收款人输入
@@ -514,7 +522,8 @@ func (b *Bot) handlePayeeInput(userID int, text string) {
 	}
 
 	data.Payee = text
-	b.showTransactionPreview(userID, 0)
+	// 使用 LastMessageID 来编辑消息，而不是发送新消息
+	b.showTransactionPreview(userID, data.LastMessageID)
 }
 
 // handleCallback 处理回调查询
@@ -573,15 +582,25 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 			b.editPosting(userID, query.Message.MessageID, callbackData)
 		} else if strings.HasPrefix(callbackData, "select_posting_account:") {
 			b.selectPostingAccount(userID, query.Message.MessageID, callbackData)
+		} else if strings.HasPrefix(callbackData, "account_page:") {
+			parts := strings.Split(callbackData, ":")
+			if len(parts) == 2 {
+				if page, err := strconv.Atoi(parts[1]); err == nil {
+					b.showAccountPage(userID, query.Message.MessageID, page)
+				}
+			}
 		}
 	}
 }
 
 // showTransactionPreview 显示交易预览
 func (b *Bot) showTransactionPreview(userID, messageID int) {
-	b.mu.RLock()
+	b.mu.Lock()
 	data, ok := b.pendingTx[userID]
-	b.mu.RUnlock()
+	if ok {
+		data.LastMessageID = messageID
+	}
+	b.mu.Unlock()
 
 	if !ok {
 		return
@@ -645,15 +664,31 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 		msg.ReplyMarkup = &keyboard
 		b.botAPI.Request(msg)
 	} else {
-		b.sendMessage(userID, builder.String(), keyboard)
+		msg := tgbotapi.NewMessage(int64(userID), builder.String())
+		msg.ReplyMarkup = &keyboard
+		sentMsg, err := b.botAPI.Send(msg)
+		if err == nil {
+			b.mu.Lock()
+			if d, ok := b.pendingTx[userID]; ok {
+				d.LastMessageID = sentMsg.MessageID
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
 // showPostingsEdit 显示分录编辑界面
 func (b *Bot) showPostingsEdit(userID, messageID int) {
-	b.mu.RLock()
-	data := b.pendingTx[userID]
-	b.mu.RUnlock()
+	b.mu.Lock()
+	data, ok := b.pendingTx[userID]
+	if ok {
+		data.LastMessageID = messageID
+	}
+	b.mu.Unlock()
+
+	if !ok {
+		return
+	}
 
 	var builder strings.Builder
 	builder.WriteString("✏️ 编辑分录\n\n")
@@ -700,7 +735,16 @@ func (b *Bot) showPostingsEdit(userID, messageID int) {
 		msg.ReplyMarkup = &keyboard
 		b.botAPI.Request(msg)
 	} else {
-		b.sendMessage(userID, builder.String(), keyboard)
+		msg := tgbotapi.NewMessage(int64(userID), builder.String())
+		msg.ReplyMarkup = &keyboard
+		sentMsg, err := b.botAPI.Send(msg)
+		if err == nil {
+			b.mu.Lock()
+			if d, ok := b.pendingTx[userID]; ok {
+				d.LastMessageID = sentMsg.MessageID
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
@@ -717,11 +761,14 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 	}
 
 	b.mu.Lock()
-	data := b.pendingTx[userID]
-	data.EditingPostingIndex = index
+	data, ok := b.pendingTx[userID]
+	if ok {
+		data.EditingPostingIndex = index
+		data.LastMessageID = messageID
+	}
 	b.mu.Unlock()
 
-	if index < 0 || index >= len(data.Postings) {
+	if !ok || index < 0 || index >= len(data.Postings) {
 		return
 	}
 
@@ -744,7 +791,16 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 		msg.ReplyMarkup = &keyboard
 		b.botAPI.Request(msg)
 	} else {
-		b.sendMessage(userID, message, keyboard)
+		msg := tgbotapi.NewMessage(int64(userID), message)
+		msg.ReplyMarkup = &keyboard
+		sentMsg, err := b.botAPI.Send(msg)
+		if err == nil {
+			b.mu.Lock()
+			if d, ok := b.pendingTx[userID]; ok {
+				d.LastMessageID = sentMsg.MessageID
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
@@ -769,9 +825,17 @@ func (b *Bot) showPostingAccountSelection(userID, messageID int) {
 
 // showAccountPage 显示账户分页
 func (b *Bot) showAccountPage(userID, messageID int, page int) {
-	b.mu.RLock()
-	data := b.pendingTx[userID]
-	b.mu.RUnlock()
+	b.mu.Lock()
+	data, ok := b.pendingTx[userID]
+	if ok {
+		data.AccountPage = page
+		data.LastMessageID = messageID
+	}
+	b.mu.Unlock()
+
+	if !ok {
+		return
+	}
 
 	pageSize := 8
 	start := page * pageSize
@@ -824,7 +888,16 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 		msg.ReplyMarkup = &keyboard
 		b.botAPI.Request(msg)
 	} else {
-		b.sendMessage(userID, builder.String(), keyboard)
+		msg := tgbotapi.NewMessage(int64(userID), builder.String())
+		msg.ReplyMarkup = &keyboard
+		sentMsg, err := b.botAPI.Send(msg)
+		if err == nil {
+			b.mu.Lock()
+			if d, ok := b.pendingTx[userID]; ok {
+				d.LastMessageID = sentMsg.MessageID
+			}
+			b.mu.Unlock()
+		}
 	}
 }
 
