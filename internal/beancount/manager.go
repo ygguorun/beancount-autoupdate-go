@@ -137,21 +137,49 @@ func (m *Manager) getAccountTemplate(accountType AccountType) string {
 
 // initMainFile 初始化主文件
 func (m *Manager) initMainFile() error {
+	// 创建 init.bean 文件
+	initBeanPath := filepath.Join(m.dataDir, "init.bean")
+	if _, err := os.Stat(initBeanPath); os.IsNotExist(err) {
+		template, err := embed.GetTemplate("init.bean")
+		if err != nil {
+			return fmt.Errorf("failed to load init.bean template: %w", err)
+		}
+
+		if err := os.WriteFile(initBeanPath, []byte(template), 0644); err != nil {
+			return fmt.Errorf("failed to create init.bean file: %w", err)
+		}
+	}
+
+	// 创建 main.bean 文件
 	if _, err := os.Stat(m.mainFile); os.IsNotExist(err) {
-		content := fmt.Sprintf(`option "title" "%s"
+		var builder strings.Builder
+
+		// 配置选项
+		fmt.Fprintf(&builder, `option "title" "%s"
 option "operating_currency" "%s"
 
-; Include account definitions
+`, m.title, m.operatingCurrency)
+
+		// 导入账户定义文件
+		fmt.Fprintf(&builder, `; Include account definitions
 include "account/assets.bean"
 include "account/expenses.bean"
 include "account/income.bean"
 include "account/liabilities.bean"
 include "account/equity.bean"
+`)
 
-; Include transaction files
-`, m.title, m.operatingCurrency)
+		// 导入资产初始化文件（在账户定义之后）
+		fmt.Fprintf(&builder, `; Include asset initialization
+include "init.bean"
+`)
 
-		if err := os.WriteFile(m.mainFile, []byte(content), 0644); err != nil {
+		// 导入 beans 文件夹下的所有 bean 文件
+		fmt.Fprintf(&builder, `; Include transaction files
+include "beans/**/*.bean"
+`)
+
+		if err := os.WriteFile(m.mainFile, []byte(builder.String()), 0644); err != nil {
 			return fmt.Errorf("failed to create main file: %w", err)
 		}
 	}
@@ -316,9 +344,6 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 			return "", fmt.Errorf("failed to create transaction file: %w", err)
 		}
 	}
-
-	// 确保文件已在主文件中包含
-	m.ensureTransactionFileIncluded(filePath)
 
 	// 追加交易
 	if err := m.appendToFile(filePath, entry); err != nil {

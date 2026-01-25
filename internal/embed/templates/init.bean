@@ -1,0 +1,8 @@
+; Init file for Beancount
+; This file is used for asset initialization
+; Add your opening balances here
+
+; Example:
+; 2024-01-01 * "Opening Balance" "Assets:Checking"
+;   Assets:Checking 10000.00 CNY
+;   Equity:Opening-Balances
