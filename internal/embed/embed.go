@@ -11,6 +11,7 @@ var templatesFS embed.FS
 
 // TemplateFiles 嵌入的模板文件
 var TemplateFiles = map[string]string{
+	"init.bean":                     "",
 	"assets.bean":                   "",
 	"equity.bean":                   "",
 	"expenses.bean":                 "",
@@ -48,6 +49,7 @@ func GetTemplateOrPanic(name string) string {
 // InitTemplates 初始化所有模板（在程序启动时调用）
 func InitTemplates() error {
 	templateNames := []string{
+		"init.bean",
 		"assets.bean",
 		"equity.bean",
 		"expenses.bean",
