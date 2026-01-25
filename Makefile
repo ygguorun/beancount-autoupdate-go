@@ -203,33 +203,33 @@ version-next:
 tag-major:
 	@echo "创建主版本标签..."
 	@NEW_VERSION=$$(svu major) && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "已创建标签 v$$NEW_VERSION"
+	git tag -a "$$NEW_VERSION" -m "Release $$NEW_VERSION" && \
+	echo "已创建标签 $$NEW_VERSION"
 
 # 创建次版本标签
 .PHONY: tag-minor
 tag-minor:
 	@echo "创建次版本标签..."
 	@NEW_VERSION=$$(svu minor) && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "已创建标签 v$$NEW_VERSION"
+	git tag -a "$$NEW_VERSION" -m "Release $$NEW_VERSION" && \
+	echo "已创建标签 $$NEW_VERSION"
 
 # 创建修订版本标签
 .PHONY: tag-patch
 tag-patch:
 	@echo "创建修订版本标签..."
 	@NEW_VERSION=$$(svu patch) && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	echo "已创建标签 v$$NEW_VERSION"
+	git tag -a "$$NEW_VERSION" -m "Release $$NEW_VERSION" && \
+	echo "已创建标签 $$NEW_VERSION"
 
 # 创建标签并推送
 .PHONY: tag
 tag:
 	@echo "创建标签并推送..."
 	@NEW_VERSION=$$(svu next) && \
-	git tag -a "v$$NEW_VERSION" -m "Release v$$NEW_VERSION" && \
-	git push origin "v$$NEW_VERSION" && \
-	echo "已创建并推送标签 v$$NEW_VERSION"
+	git tag -a "$$NEW_VERSION" -m "Release $$NEW_VERSION" && \
+	git push origin "$$NEW_VERSION" && \
+	echo "已创建并推送标签 $$NEW_VERSION"
 
 # 执行完整发布流程
 .PHONY: release
