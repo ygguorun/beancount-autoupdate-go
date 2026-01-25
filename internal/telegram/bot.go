@@ -308,6 +308,16 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 
 	logger.Infof("开始处理用户 %d 的图片，文件: %s", userID, tempFile)
 
+	// 先执行 git pull，确保获取最新的资产账户信息
+	logger.Infof("执行 git pull 获取最新账户信息...")
+	if pulled, err := b.gitMgr.PullChanges(); err != nil {
+		logger.Errorf("Git pull 失败: %v", err)
+	} else if pulled {
+		logger.Infof("Git pull 成功，已更新本地文件")
+	} else {
+		logger.Infof("没有需要拉取的更改")
+	}
+
 	// 生成唯一的临时文件名，确保上传和重命名使用同一个文件名
 	tempFilename := fmt.Sprintf("temp_%s_%d.jpg", time.Now().Format("20060102_150405"), userID)
 	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilename)
