@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 
@@ -36,21 +37,17 @@ func Init(logDir, logFile, level string, maxBytes int64, backupCount int) error 
 
 	// 配置日志轮转
 	logPath := filepath.Join(logDir, logFile)
-	log.SetOutput(&lumberjack.Logger{
+	fileWriter := &lumberjack.Logger{
 		Filename:   logPath,
 		MaxSize:    int(maxBytes / (1024 * 1024)), // 转换为 MB
 		MaxBackups: backupCount,
 		MaxAge:     30, // 保留 30 天
 		Compress:   true,
-	})
+	}
 
-	// 同时输出到标准输出
-	multiWriter := logrus.New()
-	multiWriter.SetOutput(os.Stdout)
-	multiWriter.SetLevel(logLevel)
-	multiWriter.SetFormatter(log.Formatter)
-
-	log.SetOutput(os.Stdout)
+	// 同时输出到文件和标准输出
+	multiWriter := io.MultiWriter(os.Stdout, fileWriter)
+	log.SetOutput(multiWriter)
 
 	return nil
 }
