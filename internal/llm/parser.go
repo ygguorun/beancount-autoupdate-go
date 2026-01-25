@@ -45,41 +45,27 @@ func NewParser(baseURL, model, apiKey string, timeout int) *Parser {
 
 // ParseImage 解析图片中的交易信息
 func (p *Parser) ParseImage(imagePath string, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
-	fmt.Printf("[LLM] 开始解析图片: %s\n", imagePath)
-
 	// 编码图片
-	fmt.Printf("[LLM] 编码图片...\n")
 	base64Image, err := p.encodeImage(imagePath)
 	if err != nil {
-		fmt.Printf("[LLM] 编码图片失败: %v\n", err)
 		return nil, fmt.Errorf("failed to encode image: %w", err)
 	}
-	fmt.Printf("[LLM] 图片编码完成，大小: %d bytes\n", len(base64Image))
 
 	// 构建提示词
-	fmt.Printf("[LLM] 构建提示词...\n")
 	prompt := p.buildPrompt(accountNames, tagNames)
-	fmt.Printf("[LLM] 提示词长度: %d\n", len(prompt))
 
 	// 调用 LLM API
-	fmt.Printf("[LLM] 调用 LLM API...\n")
 	response, err := p.callLLM(prompt, base64Image)
 	if err != nil {
-		fmt.Printf("[LLM] 调用 LLM API 失败: %v\n", err)
 		return nil, fmt.Errorf("failed to call LLM: %w", err)
 	}
-	fmt.Printf("[LLM] LLM API 响应长度: %d\n", len(response))
-	fmt.Printf("[LLM] LLM API 响应内容: %s\n", response[:min(200, len(response))])
 
 	// 解析响应
-	fmt.Printf("[LLM] 解析响应...\n")
 	transactionData, err := p.parseResponse(response)
 	if err != nil {
-		fmt.Printf("[LLM] 解析响应失败: %v\n", err)
 		return nil, fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Printf("[LLM] 解析成功\n")
 	return transactionData, nil
 }
 
@@ -152,7 +138,6 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 
 // callLLM 调用 LLM API
 func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
-	fmt.Printf("[LLM] 构建请求体...\n")
 	// 构建请求体
 	requestBody := map[string]interface{}{
 		"model": p.model,
@@ -179,12 +164,9 @@ func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
-	fmt.Printf("[LLM] 请求体大小: %d bytes\n", len(jsonBody))
 
 	// 创建 HTTP 请求
 	url := p.baseURL + "/chat/completions"
-	fmt.Printf("[LLM] 请求 URL: %s\n", url)
-	fmt.Printf("[LLM] 模型: %s\n", p.model)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
@@ -193,38 +175,26 @@ func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	if len(p.apiKey) > 0 {
-		fmt.Printf("[LLM] API Key 长度: %d\n", len(p.apiKey))
-	}
 
 	// 发送请求
-	fmt.Printf("[LLM] 发送请求...\n")
-	startTime := time.Now()
 	resp, err := p.client.Do(req)
 	if err != nil {
-		fmt.Printf("[LLM] 发送请求失败: %v\n", err)
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 	defer resp.Body.Close()
-	elapsed := time.Since(startTime)
-	fmt.Printf("[LLM] 请求完成，耗时: %v, 状态码: %d\n", elapsed, resp.StatusCode)
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Printf("[LLM] 读取响应失败: %v\n", err)
 		return "", fmt.Errorf("failed to read response: %w", err)
 	}
-	fmt.Printf("[LLM] 响应体大小: %d bytes\n", len(body))
 
 	// 检查状态码
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("[LLM] API 返回错误状态码 %d: %s\n", resp.StatusCode, string(body))
 		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// 解析响应
-	fmt.Printf("[LLM] 解析响应 JSON...\n")
 	var apiResponse struct {
 		Choices []struct {
 			Message struct {
@@ -234,16 +204,13 @@ func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
 	}
 
 	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		fmt.Printf("[LLM] 解析 JSON 失败: %v\n", err)
 		return "", fmt.Errorf("failed to unmarshal response: %w", err)
 	}
 
 	if len(apiResponse.Choices) == 0 {
-		fmt.Printf("[LLM] 响应中没有 choices\n")
 		return "", fmt.Errorf("no choices in response")
 	}
 
-	fmt.Printf("[LLM] 解析成功，choices 数量: %d\n", len(apiResponse.Choices))
 	return apiResponse.Choices[0].Message.Content, nil
 }
 
