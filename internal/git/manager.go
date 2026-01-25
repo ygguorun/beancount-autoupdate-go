@@ -610,17 +610,18 @@ func (m *Manager) GetStatus() (string, error) {
 
 	branchName := ref.Name().Short()
 
-	result := fmt.Sprintf("Branch: %s\n", branchName)
-	result += fmt.Sprintf("Clean: %v\n", status.IsClean())
+	var result strings.Builder
+	fmt.Fprintf(&result, "Branch: %s\n", branchName)
+	fmt.Fprintf(&result, "Clean: %v\n", status.IsClean())
 
 	if !status.IsClean() {
-		result += "Changed files:\n"
+		result.WriteString("Changed files:\n")
 		for file, fileStatus := range status {
-			result += fmt.Sprintf("  %s: %s\n", file, fileStatus.Staging)
+			fmt.Fprintf(&result, "  %s: %v\n", file, fileStatus.Staging)
 		}
 	}
 
-	return result, nil
+	return result.String(), nil
 }
 
 // AddRemote 添加远程仓库
