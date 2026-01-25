@@ -1,0 +1,56 @@
+[telegram]
+# Telegram Bot Token (从环境变量 TELEGRAM_BOT_TOKEN 读取)
+token = ""
+
+# 允许的用户 ID 列表（可选，留空则允许所有用户）
+allowed_user_ids = []
+
+[llm]
+# LLM API 配置
+base_url = "https://xxx.com/api/"
+model = "glm-4.6v-flash"
+api_key = ""  # 从环境变量 LLM_API_KEY 读取
+
+# LLM 超时设置（秒）
+timeout = 60
+
+[beancount]
+# Beancount 数据目录路径
+data_dir = "beancount"
+
+# 全局选项
+title = "个人财务账本"
+operating_currency = "CNY"
+
+[git]
+# Git 远程仓库地址
+repo_url = "git@github.com:username/beancount.git"
+
+# 自动提交配置
+auto_commit = true
+commit_message_prefix = "Add transaction:"
+
+# 推送配置
+auto_push = true
+push_timeout = 30
+
+# 冲突处理策略：abort, ours, theirs
+conflict_strategy = "abort"
+
+[logging]
+# 日志配置
+level = "INFO"
+log_dir = "logs"
+log_file = "beancount-autoupdate.log"
+max_bytes = 10485760  # 10MB
+backup_count = 5
+
+[webdav]
+# WebDAV 配置（可选）
+enabled = true  # 是否启用 WebDAV 上传
+url = "https://your-webdav-server.com/dav"  # WebDAV 服务器 URL
+username = ""  # 用户名（从环境变量 WEBDAV_USERNAME 读取）
+password = ""  # 密码（从环境变量 WEBDAV_PASSWORD 读取）
+path = "path/to/receipts"  # 上传路径
+filename_template = "{datetime}_{order_id}_{uuid}.jpg"  # 文件名模板，支持变量: {date}, {order_id}, {datetime}, {uuid}
+verify_ssl = true  # 是否验证 SSL 证书

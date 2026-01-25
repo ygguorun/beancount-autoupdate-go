@@ -1,0 +1,119 @@
+; Assets Accounts
+; Generated from default asset categories
+
+{current_date} open Assets:Cash CNY
+
+{current_date} open Assets:Bank:工商银行:储蓄 CNY
+{current_date} open Assets:Bank:工商银行:活期 CNY
+
+{current_date} open Assets:Bank:建设银行:储蓄 CNY
+{current_date} open Assets:Bank:建设银行:活期 CNY
+
+{current_date} open Assets:Bank:农业银行:储蓄 CNY
+{current_date} open Assets:Bank:农业银行:活期 CNY
+
+{current_date} open Assets:Bank:中国银行:储蓄 CNY
+{current_date} open Assets:Bank:中国银行:活期 CNY
+
+{current_date} open Assets:Bank:交通银行:储蓄 CNY
+{current_date} open Assets:Bank:交通银行:活期 CNY
+
+{current_date} open Assets:Bank:民生银行:储蓄 CNY
+{current_date} open Assets:Bank:民生银行:活期 CNY
+
+{current_date} open Assets:Bank:招商银行:储蓄 CNY
+{current_date} open Assets:Bank:招商银行:活期 CNY
+
+{current_date} open Assets:Bank:浦发银行:储蓄 CNY
+{current_date} open Assets:Bank:浦发银行:活期 CNY
+
+{current_date} open Assets:Bank:兴业银行:储蓄 CNY
+{current_date} open Assets:Bank:兴业银行:活期 CNY
+
+{current_date} open Assets:Bank:中信银行:储蓄 CNY
+{current_date} open Assets:Bank:中信银行:活期 CNY
+
+{current_date} open Assets:Bank:光大银行:储蓄 CNY
+{current_date} open Assets:Bank:光大银行:活期 CNY
+
+{current_date} open Assets:Bank:平安银行:储蓄 CNY
+{current_date} open Assets:Bank:平安银行:活期 CNY
+
+{current_date} open Assets:Bank:邮储银行:储蓄 CNY
+{current_date} open Assets:Bank:邮储银行:活期 CNY
+
+{current_date} open Assets:Digital:微信:零钱 CNY
+{current_date} open Assets:Digital:微信:零钱通 CNY
+{current_date} open Assets:Digital:微信:红包 CNY
+
+{current_date} open Assets:Digital:支付宝:余额 CNY
+{current_date} open Assets:Digital:支付宝:余额宝 CNY
+
+{current_date} open Assets:Fund:天天基金:活钱 CNY
+{current_date} open Assets:Fund:天天基金:基金 CNY
+
+{current_date} open Assets:Fund:蚂蚁基金:活钱 CNY
+{current_date} open Assets:Fund:蚂蚁基金:基金 CNY
+
+{current_date} open Assets:Securities:中信证券:股票 CNY
+{current_date} open Assets:Securities:中信证券:基金 CNY
+{current_date} open Assets:Securities:中信证券:债券 CNY
+
+{current_date} open Assets:Securities:华泰证券:股票 CNY
+{current_date} open Assets:Securities:华泰证券:基金 CNY
+{current_date} open Assets:Securities:华泰证券:债券 CNY
+
+{current_date} open Assets:Securities:中金公司:股票 CNY
+{current_date} open Assets:Securities:中金公司:基金 CNY
+{current_date} open Assets:Securities:中金公司:债券 CNY
+
+{current_date} open Assets:Securities:海通证券:股票 CNY
+{current_date} open Assets:Securities:海通证券:基金 CNY
+{current_date} open Assets:Securities:海通证券:债券 CNY
+
+{current_date} open Assets:Securities:广发证券:股票 CNY
+{current_date} open Assets:Securities:广发证券:基金 CNY
+{current_date} open Assets:Securities:广发证券:债券 CNY
+
+{current_date} open Assets:Securities:银河证券:股票 CNY
+{current_date} open Assets:Securities:银河证券:基金 CNY
+{current_date} open Assets:Securities:银河证券:债券 CNY
+
+{current_date} open Assets:Securities:申万宏源:股票 CNY
+{current_date} open Assets:Securities:申万宏源:基金 CNY
+{current_date} open Assets:Securities:申万宏源:债券 CNY
+
+{current_date} open Assets:Securities:华泰联合:股票 CNY
+{current_date} open Assets:Securities:华泰联合:基金 CNY
+{current_date} open Assets:Securities:华泰联合:债券 CNY
+
+{current_date} open Assets:Securities:国泰君安:股票 CNY
+{current_date} open Assets:Securities:国泰君安:基金 CNY
+{current_date} open Assets:Securities:国泰君安:债券 CNY
+
+{current_date} open Assets:Securities:中金财富:股票 CNY
+{current_date} open Assets:Securities:中金财富:基金 CNY
+{current_date} open Assets:Securities:中金财富:债券 CNY
+
+{current_date} open Assets:Securities:招商证券:股票 CNY
+{current_date} open Assets:Securities:招商证券:基金 CNY
+{current_date} open Assets:Securities:招商证券:债券 CNY
+
+{current_date} open Assets:Securities:中信建投:股票 CNY
+{current_date} open Assets:Securities:中信建投:基金 CNY
+{current_date} open Assets:Securities:中信建投:债券 CNY
+
+{current_date} open Assets:Insurance:寿险:现价 CNY
+{current_date} open Assets:Insurance:健康险:现价 CNY
+{current_date} open Assets:Insurance:财产险:现价 CNY
+
+{current_date} open Assets:Receivables:应收 CNY
+{current_date} open Assets:Receivables:借出 CNY
+{current_date} open Assets:Receivables:押金 CNY
+
+{current_date} open Assets:Prepaid:预付 CNY
+{current_date} open Assets:Prepaid:储值卡 CNY
+
+{current_date} open Assets:Virtual:Bitcoin CNY
+{current_date} open Assets:Virtual:Ethereum CNY
+{current_date} open Assets:Virtual:OtherCrypto CNY
