@@ -1,0 +1,54 @@
+; Expenses Accounts
+; Generated from default expense categories
+
+{current_date} open Expenses:FoodAndDrink:食品饮料 CNY
+{current_date} open Expenses:FoodAndDrink:水果零食 CNY
+
+{current_date} open Expenses:ClothingAndAppearance:服装 CNY
+{current_date} open Expenses:ClothingAndAppearance:珠宝 CNY
+{current_date} open Expenses:ClothingAndAppearance:化妆品 CNY
+{current_date} open Expenses:ClothingAndAppearance:美发美容 CNY
+
+{current_date} open Expenses:HousingAndHouseware:家居用品 CNY
+{current_date} open Expenses:HousingAndHouseware:电子产品 CNY
+{current_date} open Expenses:HousingAndHouseware:维修保养 CNY
+{current_date} open Expenses:HousingAndHouseware:家政服务 CNY
+{current_date} open Expenses:HousingAndHouseware:水电燃气 CNY
+{current_date} open Expenses:HousingAndHouseware:房租房贷 CNY
+
+{current_date} open Expenses:Transportation:公共交通 CNY
+{current_date} open Expenses:Transportation:出租车 CNY
+{current_date} open Expenses:Transportation:私家车 CNY
+{current_date} open Expenses:Transportation:火车票 CNY
+{current_date} open Expenses:Transportation:机票 CNY
+
+{current_date} open Expenses:Communication:电话费 CNY
+{current_date} open Expenses:Communication:网络费 CNY
+{current_date} open Expenses:Communication:快递费 CNY
+
+{current_date} open Expenses:Entertainment:运动健身 CNY
+{current_date} open Expenses:Entertainment:聚会娱乐 CNY
+{current_date} open Expenses:Entertainment:电影演出 CNY
+{current_date} open Expenses:Entertainment:玩具游戏 CNY
+{current_date} open Expenses:Entertainment:订阅服务 CNY
+{current_date} open Expenses:Entertainment:宠物支出 CNY
+{current_date} open Expenses:Entertainment:旅游出行 CNY
+
+{current_date} open Expenses:EducationAndStudying:书籍报刊 CNY
+{current_date} open Expenses:EducationAndStudying:培训课程 CNY
+{current_date} open Expenses:EducationAndStudying:资格考试 CNY
+
+{current_date} open Expenses:GiftsAndDonations:礼品 CNY
+{current_date} open Expenses:GiftsAndDonations:捐赠 CNY
+
+{current_date} open Expenses:MedicalAndHealthcare:诊疗费用 CNY
+{current_date} open Expenses:MedicalAndHealthcare:药品 CNY
+{current_date} open Expenses:MedicalAndHealthcare:医疗器械 CNY
+
+{current_date} open Expenses:FinanceAndInsurance:税费 CNY
+{current_date} open Expenses:FinanceAndInsurance:手续费 CNY
+{current_date} open Expenses:FinanceAndInsurance:保险费 CNY
+{current_date} open Expenses:FinanceAndInsurance:利息支出 CNY
+{current_date} open Expenses:FinanceAndInsurance:罚款赔偿 CNY
+
+{current_date} open Expenses:Miscellaneous:其他支出 CNY

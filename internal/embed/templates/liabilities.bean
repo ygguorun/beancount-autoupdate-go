@@ -1,0 +1,120 @@
+; Liabilities Accounts
+; Generated from default liability categories
+
+{current_date} open Liabilities:CreditCard:中国工商银行 CNY
+{current_date} open Liabilities:CreditCard:中国建设银行 CNY
+{current_date} open Liabilities:CreditCard:中国农业银行 CNY
+{current_date} open Liabilities:CreditCard:中国银行 CNY
+{current_date} open Liabilities:CreditCard:交通银行 CNY
+{current_date} open Liabilities:CreditCard:民生银行 CNY
+{current_date} open Liabilities:CreditCard:招商银行 CNY
+{current_date} open Liabilities:CreditCard:浦发银行 CNY
+{current_date} open Liabilities:CreditCard:兴业银行 CNY
+{current_date} open Liabilities:CreditCard:中信银行 CNY
+{current_date} open Liabilities:CreditCard:光大银行 CNY
+{current_date} open Liabilities:CreditCard:平安银行 CNY
+{current_date} open Liabilities:CreditCard:邮储银行 CNY
+
+{current_date} open Liabilities:Digital:支付宝:花呗 CNY
+{current_date} open Liabilities:Digital:支付宝:借呗 CNY
+{current_date} open Liabilities:Digital:支付宝:网商贷 CNY
+
+{current_date} open Liabilities:Digital:微信:微粒贷 CNY
+
+{current_date} open Liabilities:Digital:京东:白条 CNY
+{current_date} open Liabilities:Digital:京东:金条 CNY
+
+{current_date} open Liabilities:Digital:美团:支付 CNY
+{current_date} open Liabilities:Digital:美团:借钱 CNY
+
+{current_date} open Liabilities:Digital:抖音:支付 CNY
+{current_date} open Liabilities:Digital:抖音:借钱 CNY
+
+{current_date} open Liabilities:Digital:快手:支付 CNY
+{current_date} open Liabilities:Digital:快手:借钱 CNY
+
+{current_date} open Liabilities:Digital:拼多多:支付 CNY
+
+{current_date} open Liabilities:Bank:中国工商银行:信用贷 CNY
+{current_date} open Liabilities:Bank:中国工商银行:车贷 CNY
+{current_date} open Liabilities:Bank:中国工商银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:中国建设银行:信用贷 CNY
+{current_date} open Liabilities:Bank:中国建设银行:车贷 CNY
+{current_date} open Liabilities:Bank:中国建设银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:中国农业银行:信用贷 CNY
+{current_date} open Liabilities:Bank:中国农业银行:车贷 CNY
+{current_date} open Liabilities:Bank:中国农业银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:中国银行:信用贷 CNY
+{current_date} open Liabilities:Bank:中国银行:车贷 CNY
+{current_date} open Liabilities:Bank:中国银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:交通银行:信用贷 CNY
+{current_date} open Liabilities:Bank:交通银行:车贷 CNY
+{current_date} open Liabilities:Bank:交通银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:民生银行:信用贷 CNY
+{current_date} open Liabilities:Bank:民生银行:车贷 CNY
+{current_date} open Liabilities:Bank:民生银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:招商银行:信用贷 CNY
+{current_date} open Liabilities:Bank:招商银行:车贷 CNY
+{current_date} open Liabilities:Bank:招商银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:浦发银行:信用贷 CNY
+{current_date} open Liabilities:Bank:浦发银行:车贷 CNY
+{current_date} open Liabilities:Bank:浦发银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:兴业银行:信用贷 CNY
+{current_date} open Liabilities:Bank:兴业银行:车贷 CNY
+{current_date} open Liabilities:Bank:兴业银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:中信银行:信用贷 CNY
+{current_date} open Liabilities:Bank:中信银行:车贷 CNY
+{current_date} open Liabilities:Bank:中信银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:光大银行:信用贷 CNY
+{current_date} open Liabilities:Bank:光大银行:车贷 CNY
+{current_date} open Liabilities:Bank:光大银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:平安银行:信用贷 CNY
+{current_date} open Liabilities:Bank:平安银行:车贷 CNY
+{current_date} open Liabilities:Bank:平安银行:房贷 CNY
+
+{current_date} open Liabilities:Bank:邮储银行:信用贷 CNY
+{current_date} open Liabilities:Bank:邮储银行:车贷 CNY
+{current_date} open Liabilities:Bank:邮储银行:房贷 CNY
+
+{current_date} open Liabilities:OnlineLending:钱花:消费贷 CNY
+{current_date} open Liabilities:OnlineLending:钱花:信用贷 CNY
+
+{current_date} open Liabilities:OnlineLending:360借条:贷款 CNY
+
+{current_date} open Liabilities:OnlineLending:数禾科技:贷款 CNY
+
+{current_date} open Liabilities:OnlineLending:挖财:贷款 CNY
+
+{current_date} open Liabilities:OnlineLending:人人贷:贷款 CNY
+
+{current_date} open Liabilities:OnlineLending:陆金所:贷款 CNY
+
+{current_date} open Liabilities:OnlineLending:其他网贷 CNY
+
+{current_date} open Liabilities:Personal:家人借款 CNY
+{current_date} open Liabilities:Personal:朋友借款 CNY
+{current_date} open Liabilities:Personal:同事借款 CNY
+{current_date} open Liabilities:Personal:他人借款 CNY
+
+{current_date} open Liabilities:AccountsPayable:应付 CNY
+{current_date} open Liabilities:AccountsPayable:应计费用 CNY
+
+{current_date} open Liabilities:TaxesPayable:个税 CNY
+{current_date} open Liabilities:TaxesPayable:财产税 CNY
+{current_date} open Liabilities:TaxesPayable:增值税 CNY
+{current_date} open Liabilities:TaxesPayable:其他税费 CNY
+
+{current_date} open Liabilities:OtherLiabilities:递延收入 CNY
+{current_date} open Liabilities:OtherLiabilities:或有负债 CNY
+{current_date} open Liabilities:OtherLiabilities:担保 CNY

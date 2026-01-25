@@ -1,0 +1,49 @@
+; Income Accounts
+; Generated from default income categories
+
+{current_date} open Income:OccupationalEarnings:工资收入 CNY
+{current_date} open Income:OccupationalEarnings:奖金收入 CNY
+{current_date} open Income:OccupationalEarnings:加班费 CNY
+{current_date} open Income:OccupationalEarnings:副业收入 CNY
+{current_date} open Income:OccupationalEarnings:佣金 CNY
+{current_date} open Income:OccupationalEarnings:绩效奖金 CNY
+{current_date} open Income:OccupationalEarnings:股票期权 CNY
+{current_date} open Income:OccupationalEarnings:遣散费 CNY
+
+{current_date} open Income:FinanceAndInvestment:投资收入 CNY
+{current_date} open Income:FinanceAndInvestment:股息收入 CNY
+{current_date} open Income:FinanceAndInvestment:资本利得 CNY
+{current_date} open Income:FinanceAndInvestment:利息收入 CNY
+{current_date} open Income:FinanceAndInvestment:租金收入 CNY
+{current_date} open Income:FinanceAndInvestment:版税收入 CNY
+{current_date} open Income:FinanceAndInvestment:基金收入 CNY
+{current_date} open Income:FinanceAndInvestment:股票收入 CNY
+{current_date} open Income:FinanceAndInvestment:债券收入 CNY
+
+{current_date} open Income:GovernmentSubsidy:养老金 CNY
+{current_date} open Income:GovernmentSubsidy:社保 CNY
+{current_date} open Income:GovernmentSubsidy:失业救济 CNY
+{current_date} open Income:GovernmentSubsidy:医疗津贴 CNY
+{current_date} open Income:GovernmentSubsidy:教育津贴 CNY
+{current_date} open Income:GovernmentSubsidy:住房补贴 CNY
+{current_date} open Income:GovernmentSubsidy:其他补贴 CNY
+
+{current_date} open Income:GiftAndLuckyMoney:礼品 CNY
+{current_date} open Income:GiftAndLuckyMoney:红包 CNY
+{current_date} open Income:GiftAndLuckyMoney:婚礼礼金 CNY
+{current_date} open Income:GiftAndLuckyMoney:生日礼金 CNY
+
+{current_date} open Income:WinningsIncome:彩票 CNY
+{current_date} open Income:WinningsIncome:赌博 CNY
+{current_date} open Income:WinningsIncome:游戏奖品 CNY
+{current_date} open Income:WinningsIncome:竞赛奖品 CNY
+
+{current_date} open Income:Windfall:遗产 CNY
+{current_date} open Income:Windfall:保险理赔 CNY
+{current_date} open Income:Windfall:赔偿 CNY
+{current_date} open Income:Windfall:退款 CNY
+{current_date} open Income:Windfall:捡到的钱 CNY
+
+{current_date} open Income:OtherIncome:杂项 CNY
+{current_date} open Income:OtherIncome:意外收入 CNY
+{current_date} open Income:OtherIncome:退回的钱 CNY

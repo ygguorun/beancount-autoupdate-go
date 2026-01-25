@@ -1,0 +1,7 @@
+; Equity Accounts
+; Generated from default equity categories
+
+{current_date} open Equity:Opening-Balances CNY
+{current_date} open Equity:Retained-Earnings CNY
+{current_date} open Equity:Net-Income CNY
+{current_date} open Equity:Other-Equity CNY
