@@ -44,22 +44,25 @@ type TransactionData struct {
 
 // PendingTransaction 待确认的交易
 type PendingTransaction struct {
-	UserID              int
-	Date                string
-	Time                string
-	Flag                string
-	Payee               string
-	Narration           string
-	Tags                []string
-	Postings            []PostingData
-	OrderID             string
-	Discount            string
-	OriginalAmount      string
-	ImageURL            string
-	TempImageURL        string
-	TempWebDAVPath      string
-	EditingPostingIndex int
-	AvailableAccounts   []string
-	AccountPage         int
-	LastMessageID       int // 最后一条消息的ID，用于编辑消息
+	UserID                 int
+	Date                   string
+	Time                   string
+	Flag                   string
+	Payee                  string
+	Narration              string
+	Tags                   []string
+	Postings               []PostingData
+	OrderID                string
+	Discount               string
+	OriginalAmount         string
+	ImageURL               string
+	TempImageURL           string
+	TempWebDAVPath         string
+	EditingPostingIndex    int
+	AvailableAccounts      []string
+	AccountPage            int
+	LastMessageID          int // 最后一条消息的ID，用于编辑消息
+	OriginalMessageID      int // 原始预览消息的ID，用于返回预览
+	EditingPostingMessageID int // 分录编辑界面的消息ID
+	PreviousMessageIDs     []int // 之前需要删除的消息ID列表
 }
