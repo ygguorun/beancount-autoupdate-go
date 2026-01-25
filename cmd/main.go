@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -18,14 +19,32 @@ import (
 	"beancount-autoupdate/internal/webdav"
 )
 
+var (
+	Version   = "dev"
+	BuildTime = "unknown"
+)
+
 func main() {
+	// 定义命令行参数
+	configPath := flag.String("config", "", "配置文件路径 (默认: ./config.toml)")
+	version := flag.Bool("version", false, "显示版本信息")
+	flag.Parse()
+
+	// 显示版本信息
+	if *version {
+		fmt.Printf("Beancount AutoUpdate\n")
+		fmt.Printf("Version: %s\n", Version)
+		fmt.Printf("Build Time: %s\n", BuildTime)
+		os.Exit(0)
+	}
+
 	// 初始化嵌入的模板
 	if err := embed.InitTemplates(); err != nil {
 		logrus.Fatalf("Failed to initialize embedded templates: %v", err)
 	}
 
 	// 加载配置
-	cfg, err := config.LoadConfig("")
+	cfg, err := config.LoadConfig(*configPath)
 	if err != nil {
 		fmt.Printf("❌ 加载配置失败: %v\n", err)
 		os.Exit(1)
