@@ -48,8 +48,8 @@ check_root() {
 detect_arch() {
     ARCH=$(uname -m)
     case $ARCH in
-        x86_64)
-            ARCH="amd64"
+        x86_64|i386|i686)
+            ARCH="x86_64"
             ;;
         aarch64|arm64)
             ARCH="arm64"
@@ -74,7 +74,7 @@ download_binary() {
     if [[ "$VERSION" == "latest" ]]; then
         DOWNLOAD_URL="$REPO_URL/releases/latest/download/${APP_NAME}_Linux_${ARCH}.tar.gz"
     else
-        DOWNLOAD_URL="$REPO_URL/releases/download/v${VERSION}/${APP_NAME}_Linux_${ARCH}.tar.gz"
+        DOWNLOAD_URL="$REPO_URL/releases/download/${VERSION}/${APP_NAME}_Linux_${ARCH}.tar.gz"
     fi
 
     print_info "下载地址: $DOWNLOAD_URL"
