@@ -247,41 +247,41 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 
 	// 构建交易条目头部
 	if payee != "" {
-		builder.WriteString(fmt.Sprintf("%s %s \"%s\" \"%s\"", dateStr, flag, payee, narration))
+		fmt.Fprintf(&builder, "%s %s \"%s\" \"%s\"", dateStr, flag, payee, narration)
 	} else {
-		builder.WriteString(fmt.Sprintf("%s %s \"%s\"", dateStr, flag, narration))
+		fmt.Fprintf(&builder, "%s %s \"%s\"", dateStr, flag, narration)
 	}
 
 	// 添加标签
 	if len(tags) > 0 {
 		for _, tag := range tags {
-			builder.WriteString(fmt.Sprintf(" #%s", tag))
+			fmt.Fprintf(&builder, " #%s", tag)
 		}
 	}
 	builder.WriteString("\n")
 
 	// 添加时间元数据
-	builder.WriteString(fmt.Sprintf("  time: \"%s\"\n", timeStr))
+	fmt.Fprintf(&builder, "  time: \"%s\"\n", timeStr)
 
 	// 添加订单相关元数据
 	if orderID != "" {
-		builder.WriteString(fmt.Sprintf("  order-id: \"%s\"\n", orderID))
+		fmt.Fprintf(&builder, "  order-id: \"%s\"\n", orderID)
 	}
 	if discount != "" {
-		builder.WriteString(fmt.Sprintf("  discount: \"%s\"\n", discount))
+		fmt.Fprintf(&builder, "  discount: \"%s\"\n", discount)
 	}
 	if originalAmount != "" {
-		builder.WriteString(fmt.Sprintf("  original-amount: \"%s\"\n", originalAmount))
+		fmt.Fprintf(&builder, "  original-amount: \"%s\"\n", originalAmount)
 	}
 	if imageURL != "" {
-		builder.WriteString(fmt.Sprintf("  image-url: \"%s\"\n", imageURL))
+		fmt.Fprintf(&builder, "  image-url: \"%s\"\n", imageURL)
 	}
 
 	// 添加 extra 字段
 	for key, value := range extra {
 		if value != "" {
 			metadataKey := strings.ReplaceAll(key, "_", "-")
-			builder.WriteString(fmt.Sprintf("  %s: \"%s\"\n", metadataKey, value))
+			fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, value)
 		}
 	}
 
@@ -297,9 +297,9 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 		}
 
 		if posting.Flag != "" {
-			builder.WriteString(fmt.Sprintf("  %s %s %s %s\n", posting.Flag, posting.Account, amount, currency))
+			fmt.Fprintf(&builder, "  %s %s %s %s\n", posting.Flag, posting.Account, amount, currency)
 		} else {
-			builder.WriteString(fmt.Sprintf("  %s %s %s\n", posting.Account, amount, currency))
+			fmt.Fprintf(&builder, "  %s %s %s\n", posting.Account, amount, currency)
 		}
 	}
 
