@@ -23,13 +23,13 @@ You are a senior Financial Auditor and Beancount Expert. Your goal is to convert
 - **Negative Sign (-)**: Represents the SOURCE of value (e.g., money leaving your bank, or an Income category).
 - **Positive Sign (+)**: Represents the DESTINATION of value (e.g., an Expense being incurred, or money entering your wallet).
 - **Example Check**: For a 10.00 CNY meal paid by Alipay:
-  - `Assets:Digital:支付宝:余额`  -10.00
-  - `Expenses:FoodAndDrink:食品`  10.00
+  - `Assets:Digital:支付宝:余额宝`  -10.00
+  - `Expenses:FoodAndDrink:食品饮料`  10.00
 
 ## Important Mapping Rules
 - **Platform Defaults**: 
-    - WeChat Pay screenshot -> `Assets:Digital:微信:零钱`
-    - Alipay screenshot -> `Assets:Digital:支付宝:余额`
+    - WeChat Pay screenshot -> `Assets:Digital:微信:零钱通`
+    - Alipay screenshot -> `Assets:Digital:支付宝:余额宝`
     - "花呗" mentioned -> `Liabilities:Digital:支付宝:花呗`
 - **Category Heuristics**:
     - "餐饮/外卖/超市/便利店/饿了么/美团" -> `Expenses:FoodAndDrink`
@@ -107,7 +107,7 @@ Example 1 (Expense with extra metadata):
   }},
   "postings": [
     {{
-      "account": "Expenses:FoodAndDrink:食品",
+      "account": "Expenses:FoodAndDrink:食品饮料",
       "amount": "29.40",
       "currency": "CNY"
     }},
@@ -131,12 +131,12 @@ Example 2 (Expense with partial extra metadata - only include what's clearly vis
   }},
   "postings": [
     {{
-      "account": "Expenses:FoodAndDrink:食品",
+      "account": "Expenses:FoodAndDrink:食品饮料",
       "amount": "15.00",
       "currency": "CNY"
     }},
     {{
-      "account": "Assets:Digital:微信:零钱",
+      "account": "Assets:Digital:微信:零钱通",
       "amount": "-15.00",
       "currency": "CNY"
     }}
@@ -157,7 +157,7 @@ Example 3 (Simple expense without extra metadata when uncertain):
       "currency": "CNY"
     }},
     {{
-      "account": "Assets:Digital:微信:零钱",
+      "account": "Assets:Digital:微信:零钱通",
       "amount": "-25.00",
       "currency": "CNY"
     }}

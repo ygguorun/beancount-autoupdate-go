@@ -42,7 +42,6 @@
 {current_date} open Assets:Bank:邮储银行:储蓄 CNY
 {current_date} open Assets:Bank:邮储银行:活期 CNY
 
-{current_date} open Assets:Digital:微信:零钱 CNY
 {current_date} open Assets:Digital:微信:零钱通 CNY
 {current_date} open Assets:Digital:微信:红包 CNY
 
