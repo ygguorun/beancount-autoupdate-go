@@ -424,19 +424,20 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	// 存储待确认的交易
 	b.mu.Lock()
 	b.pendingTx[userID] = &beancount.PendingTransaction{
-		UserID:         userID,
-		Date:           transactionTime.Format("2006-01-02"),
-		Time:           transactionTime.Format("15:04:05"),
-		Flag:           parseResult.Flag,
-		Payee:          parseResult.Payee,
-		Narration:      parseResult.Narration,
-		Tags:           parseResult.Tags,
-		Postings:       parseResult.Postings,
-		OrderID:        parseResult.OrderID,
-		Extra:          parseResult.Extra,
-		ImageURL:       "",
-		TempImageURL:   uploadResult,
-		TempWebDAVPath: tempWebDAVPath,
+		UserID:            userID,
+		Date:              transactionTime.Format("2006-01-02"),
+		Time:              transactionTime.Format("15:04:05"),
+		Flag:              parseResult.Flag,
+		Payee:             parseResult.Payee,
+		Narration:         parseResult.Narration,
+		Tags:              parseResult.Tags,
+		Postings:          parseResult.Postings,
+		OrderID:           parseResult.OrderID,
+		Extra:             parseResult.Extra,
+		ImageURL:          "",
+		TempImageURL:      uploadResult,
+		TempWebDAVPath:    tempWebDAVPath,
+		SpecialDirectives: parseResult.SpecialDirectives,
 	}
 	b.mu.Unlock()
 
@@ -695,59 +696,86 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 	}
 
 	var builder strings.Builder
-	builder.WriteString("📋 交易预览\n")
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString(fmt.Sprintf("日期: %s\n", data.Date))
-	builder.WriteString(fmt.Sprintf("时间: %s\n", data.Time))
-	builder.WriteString(fmt.Sprintf("标志: %s\n", data.Flag))
-	builder.WriteString(fmt.Sprintf("收款人: %s\n", data.Payee))
-	builder.WriteString(fmt.Sprintf("描述: %s\n", data.Narration))
+	var keyboard tgbotapi.InlineKeyboardMarkup
 
-	if data.OrderID != "" {
-		builder.WriteString(fmt.Sprintf("订单号: %s\n", data.OrderID))
-	}
-
-	builder.WriteString("\n💰 金额信息:\n")
-	if data.Extra != nil {
-		if data.Extra["original_amount"] != "" {
-			builder.WriteString(fmt.Sprintf("  原始金额: %s CNY\n", data.Extra["original_amount"]))
+	// 检查是否有特殊指令
+	if len(data.SpecialDirectives) > 0 {
+		// 有特殊指令，只显示特殊指令
+		builder.WriteString("📋 特殊指令预览\n")
+		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		builder.WriteString(fmt.Sprintf("日期: %s\n", data.Date))
+		builder.WriteString(fmt.Sprintf("时间: %s\n", data.Time))
+		builder.WriteString(fmt.Sprintf("描述: %s\n", data.Narration))
+		builder.WriteString("\n🔧 特殊指令:\n")
+		for i, directive := range data.SpecialDirectives {
+			builder.WriteString(fmt.Sprintf("  %d. %s\n", i+1, directive))
 		}
-		if data.Extra["discount"] != "" {
-			builder.WriteString(fmt.Sprintf("  优惠总额: %s CNY\n", data.Extra["discount"]))
-		}
-	}
+		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	if len(data.Tags) > 0 {
-		builder.WriteString(fmt.Sprintf("\n标签: %s\n", strings.Join(data.Tags, ", ")))
-	}
+		// 简化的键盘：只有确认和取消
+		keyboard = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+	} else {
+		// 没有特殊指令，显示标准交易预览
+		builder.WriteString("📋 交易预览\n")
+		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		builder.WriteString(fmt.Sprintf("日期: %s\n", data.Date))
+		builder.WriteString(fmt.Sprintf("时间: %s\n", data.Time))
+		builder.WriteString(fmt.Sprintf("标志: %s\n", data.Flag))
+		builder.WriteString(fmt.Sprintf("收款人: %s\n", data.Payee))
+		builder.WriteString(fmt.Sprintf("描述: %s\n", data.Narration))
 
-	builder.WriteString("\n分录:\n")
-	for i, posting := range data.Postings {
-		amount := posting.Amount
-		if amount == "" {
-			amount = "0.00"
+		if data.OrderID != "" {
+			builder.WriteString(fmt.Sprintf("订单号: %s\n", data.OrderID))
 		}
-		currency := posting.Currency
-		if currency == "" {
-			currency = "CNY"
-		}
-		builder.WriteString(fmt.Sprintf("  %d. %s: %s %s\n", i+1, posting.Account, amount, currency))
-	}
-	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	keyboard := tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📝 修改描述", "edit_narration"),
-			tgbotapi.NewInlineKeyboardButtonData("🏪 修改收款人", "edit_payee"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", "edit_postings"),
-		),
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
-			tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
-		),
-	)
+		builder.WriteString("\n💰 金额信息:\n")
+		if data.Extra != nil {
+			if data.Extra["original_amount"] != "" {
+				builder.WriteString(fmt.Sprintf("  原始金额: %s CNY\n", data.Extra["original_amount"]))
+			}
+			if data.Extra["discount"] != "" {
+				builder.WriteString(fmt.Sprintf("  优惠总额: %s CNY\n", data.Extra["discount"]))
+			}
+		}
+
+		if len(data.Tags) > 0 {
+			builder.WriteString(fmt.Sprintf("\n标签: %s\n", strings.Join(data.Tags, ", ")))
+		}
+
+		builder.WriteString("\n分录:\n")
+		for i, posting := range data.Postings {
+			amount := posting.Amount
+			if amount == "" {
+				amount = "0.00"
+			}
+			currency := posting.Currency
+			if currency == "" {
+				currency = "CNY"
+			}
+			builder.WriteString(fmt.Sprintf("  %d. %s: %s %s\n", i+1, posting.Account, amount, currency))
+		}
+		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+		// 完整的键盘：包含编辑选项
+		keyboard = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("📝 修改描述", "edit_narration"),
+				tgbotapi.NewInlineKeyboardButtonData("🏪 修改收款人", "edit_payee"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", "edit_postings"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+	}
 
 	if messageID > 0 {
 		logger.Infof("编辑消息: messageID=%d", messageID)
@@ -1126,18 +1154,38 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 	// 解析日期
 	transactionTime, _ := time.Parse("2006-01-02 15:04:05", data.Date+" "+data.Time)
 
-	// 添加交易到 Beancount
-	entry, err := b.beancountMgr.AddTransactionFromPostings(
-		transactionTime,
-		data.Flag,
-		data.Payee,
-		data.Narration,
-		data.Tags,
-		data.Postings,
-		data.OrderID,
-		finalImageURL,
-		data.Extra,
-	)
+	var entry string
+	var err error
+
+	// 检查是否有特殊指令
+	if len(data.SpecialDirectives) > 0 {
+		// 使用包含特殊指令的方法
+		transactionData := &beancount.TransactionData{
+			DateTime:          data.Date + " " + data.Time,
+			Flag:              data.Flag,
+			Payee:             data.Payee,
+			Narration:         data.Narration,
+			Tags:              data.Tags,
+			Postings:          data.Postings,
+			OrderID:           data.OrderID,
+			Extra:             data.Extra,
+			SpecialDirectives: data.SpecialDirectives,
+		}
+		entry, err = b.beancountMgr.AddTransactionWithDirectives(transactionData)
+	} else {
+		// 使用标准交易记录方法
+		entry, err = b.beancountMgr.AddTransactionFromPostings(
+			transactionTime,
+			data.Flag,
+			data.Payee,
+			data.Narration,
+			data.Tags,
+			data.Postings,
+			data.OrderID,
+			finalImageURL,
+			data.Extra,
+		)
+	}
 
 	if err != nil {
 		logger.Errorf("Failed to add transaction: %v", err)

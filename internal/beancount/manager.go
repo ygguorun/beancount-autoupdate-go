@@ -393,3 +393,61 @@ func (m *Manager) appendToFile(filePath, content string) error {
 	_, err = file.WriteString(content)
 	return err
 }
+
+// AddTransactionWithDirectives 添加包含特殊指令的交易记录
+func (m *Manager) AddTransactionWithDirectives(transaction *TransactionData) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// 解析日期时间
+	date, err := time.Parse("2006-01-02 15:04:05", transaction.DateTime)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse datetime: %w", err)
+	}
+
+	var builder strings.Builder
+
+	// 如果有特殊指令，只添加特殊指令，不添加基础交易条目
+	if len(transaction.SpecialDirectives) > 0 {
+		// 添加特殊指令
+		for _, directive := range transaction.SpecialDirectives {
+			builder.WriteString(directive)
+			builder.WriteString("\n")
+		}
+
+		builder.WriteString("\n")
+	} else {
+		// 没有特殊指令，使用标准交易记录
+		entry, err := m.AddTransactionFromPostings(
+			date,
+			transaction.Flag,
+			transaction.Payee,
+			transaction.Narration,
+			transaction.Tags,
+			transaction.Postings,
+			transaction.OrderID,
+			"",
+			transaction.Extra,
+		)
+		return entry, err
+	}
+
+	entry := builder.String()
+
+	// 写入文件
+	filePath := m.GetTransactionFilePath(date)
+
+	// 确保文件存在
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		if err := os.WriteFile(filePath, []byte(""), 0644); err != nil {
+			return "", fmt.Errorf("failed to create transaction file: %w", err)
+		}
+	}
+
+	// 追加交易
+	if err := m.appendToFile(filePath, entry); err != nil {
+		return "", fmt.Errorf("failed to write transaction: %w", err)
+	}
+
+	return entry, nil
+}

@@ -22,16 +22,17 @@ var logger = logrus.StandardLogger()
 
 // Parser LLM 解析器
 type Parser struct {
-	baseURL string
-	model   string
-	apiKey  string
-	timeout time.Duration
-	client  *http.Client
-	mu      sync.Mutex
+	baseURL      string
+	model        string
+	apiKey       string
+	timeout      time.Duration
+	client       *http.Client
+	mu           sync.Mutex
+	extendPrompt string
 }
 
 // NewParser 创建 LLM 解析器
-func NewParser(baseURL, model, apiKey string, timeout int) *Parser {
+func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string) *Parser {
 	return &Parser{
 		baseURL: baseURL,
 		model:   model,
@@ -40,6 +41,7 @@ func NewParser(baseURL, model, apiKey string, timeout int) *Parser {
 		client: &http.Client{
 			Timeout: time.Duration(timeout) * time.Second,
 		},
+		extendPrompt: extendPrompt,
 	}
 }
 
@@ -132,6 +134,37 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 	prompt = strings.ReplaceAll(prompt, "{current_time}", currentTime)
 	prompt = strings.ReplaceAll(prompt, "{account_names}", accountList)
 	prompt = strings.ReplaceAll(prompt, "{tags}", tagList)
+
+	// 处理扩展 prompt
+	if p.extendPrompt != "" {
+		parts := strings.SplitN(p.extendPrompt, ":", 2)
+		if len(parts) == 2 {
+			mode := strings.TrimSpace(parts[0])
+			content := strings.TrimSpace(parts[1])
+
+			// 处理 \n 转义字符，转换为实际的换行符
+			content = strings.ReplaceAll(content, "\\n", "\n")
+			// 处理 \\n，保留为字面量的 \n
+			content = strings.ReplaceAll(content, "\\\\n", "\\n")
+
+			switch mode {
+			case "append":
+				// 追加模式：在原有 prompt 基础上追加
+				prompt = prompt + "\n\n" + content
+			case "replace":
+				// 替换模式：完全替换原有 prompt
+				prompt = content
+				// 仍然替换占位符（如果用户在自定义 prompt 中使用了占位符）
+				prompt = strings.ReplaceAll(prompt, "{current_time}", currentTime)
+				prompt = strings.ReplaceAll(prompt, "{account_names}", accountList)
+				prompt = strings.ReplaceAll(prompt, "{tags}", tagList)
+			default:
+				logger.Warnf("Unknown extend_prompt mode: %s, ignoring. Supported modes: append, replace", mode)
+			}
+		} else {
+			logger.Warnf("Invalid extend_prompt format. Expected 'mode:content', got: %s", p.extendPrompt)
+		}
+	}
 
 	return prompt
 }

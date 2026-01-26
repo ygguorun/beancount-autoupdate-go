@@ -128,6 +128,7 @@ func main() {
 		cfg.LLM.Model,
 		cfg.LLM.APIKey,
 		cfg.LLM.Timeout,
+		cfg.LLM.ExtendPrompt,
 	)
 
 	// 初始化 WebDAV 管理器（如果启用）
