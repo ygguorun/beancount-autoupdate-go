@@ -216,6 +216,9 @@ func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
 
 // parseResponse 解析 LLM 响应
 func (p *Parser) parseResponse(response string) (*beancount.TransactionData, error) {
+	// 打印 LLM 返回值
+	logger.Infof("LLM Response: %s", response)
+
 	// 提取 JSON（可能包含 markdown 代码块）
 	response = strings.TrimSpace(response)
 
