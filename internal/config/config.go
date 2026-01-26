@@ -30,10 +30,11 @@ type TelegramConfig struct {
 
 // LLMConfig LLM 配置
 type LLMConfig struct {
-	BaseURL string `toml:"base_url"`
-	Model   string `toml:"model"`
-	APIKey  string `toml:"api_key"`
-	Timeout int    `toml:"timeout"`
+	BaseURL      string `toml:"base_url"`
+	Model        string `toml:"model"`
+	APIKey       string `toml:"api_key"`
+	Timeout      int    `toml:"timeout"`
+	ExtendPrompt string `toml:"extend_prompt"` // 额外的 prompt，可以是 "append" 或 "replace"
 }
 
 // BeancountConfig Beancount 配置

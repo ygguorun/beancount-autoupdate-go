@@ -14,6 +14,33 @@ api_key = ""  # 从环境变量 LLM_API_KEY 读取
 # LLM 超时设置（秒）
 timeout = 60
 
+# 扩展 prompt 配置（可选）
+# 支持 TOML 的三种多行字符串语法：
+#
+# 方式1: 使用普通字符串 + \n 转义（适合简单的多行文本）
+# extend_prompt = 'append:请特别注意识别发票号码和税号\n并将它们包含在 extra 字段中\n\n另外，注意识别交易的具体时间'
+#
+# 方式2: 使用三重引号 """（支持转义序列，适合包含变量或转义字符的文本）
+# extend_prompt = """
+# append:请特别注意识别以下信息：
+# 1. 发票号码 - 包含在 extra.invoice_number
+# 2. 税号 - 包含在 extra.tax_id
+# 3. 交易地点 - 包含在 extra.transaction_location
+# """
+#
+# 方式3: 使用三重撇号 '''（不支持转义，适合原始文本，注意换行）
+# extend_prompt = '''
+# append:请特别注意识别以下信息：
+# 1. 发票号码
+# 2. 税号
+# 3. 交易地点
+# '''
+#
+# 模式说明:
+# - "append": 在原有 prompt 基础上追加新的 prompt
+# - "replace": 使用新的 prompt 完全替换原有 prompt
+extend_prompt = ""
+
 [beancount]
 # Beancount 数据目录路径
 data_dir = "beancount"
