@@ -30,16 +30,14 @@ type PostingData struct {
 
 // TransactionData 交易数据
 type TransactionData struct {
-	DateTime       string            `json:"datetime"`
-	Flag           string            `json:"flag"`
-	Payee          string            `json:"payee"`
-	Narration      string            `json:"narration"`
-	Tags           []string          `json:"tags"`
-	Postings       []PostingData     `json:"postings"`
-	OrderID        string            `json:"order_id"`
-	Discount       string            `json:"discount"`
-	OriginalAmount string            `json:"original_amount"`
-	Extra          map[string]string `json:"extra"`
+	DateTime  string            `json:"datetime"`
+	Flag      string            `json:"flag"`
+	Payee     string            `json:"payee"`
+	Narration string            `json:"narration"`
+	Tags      []string          `json:"tags"`
+	Postings  []PostingData     `json:"postings"`
+	OrderID   string            `json:"order_id"`
+	Extra     map[string]string `json:"extra"`
 }
 
 // PendingTransaction 待确认的交易
@@ -53,8 +51,7 @@ type PendingTransaction struct {
 	Tags                   []string
 	Postings               []PostingData
 	OrderID                string
-	Discount               string
-	OriginalAmount         string
+	Extra                  map[string]string
 	ImageURL               string
 	TempImageURL           string
 	TempWebDAVPath         string

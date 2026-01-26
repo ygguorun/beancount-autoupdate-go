@@ -264,7 +264,7 @@ func (m *Manager) parseAccountFile(accountType AccountType) []string {
 }
 
 // AddTransactionFromPostings 从分录列表添加交易记录
-func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narration string, tags []string, postings []PostingData, orderID, discount, originalAmount, imageURL string, extra map[string]string) (string, error) {
+func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narration string, tags []string, postings []PostingData, orderID, imageURL string, extra map[string]string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -295,17 +295,11 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 	if orderID != "" {
 		fmt.Fprintf(&builder, "  order-id: \"%s\"\n", orderID)
 	}
-	if discount != "" {
-		fmt.Fprintf(&builder, "  discount: \"%s\"\n", discount)
-	}
-	if originalAmount != "" {
-		fmt.Fprintf(&builder, "  original-amount: \"%s\"\n", originalAmount)
-	}
 	if imageURL != "" {
 		fmt.Fprintf(&builder, "  image-url: \"%s\"\n", imageURL)
 	}
 
-	// 添加 extra 字段
+	// 添加 extra 字段（包括 discount 和 original_amount）
 	for key, value := range extra {
 		if value != "" {
 			metadataKey := strings.ReplaceAll(key, "_", "-")
