@@ -300,8 +300,24 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 	}
 
 	// 添加 extra 字段（包括 discount 和 original_amount）
+	// discount 和 original_amount 必须同时出现或不出现
+	hasDiscount := extra["discount"] != ""
+	hasOriginalAmount := extra["original_amount"] != ""
+
 	for key, value := range extra {
-		if value != "" {
+		if value == "" {
+			continue
+		}
+
+		// 检查是否为 discount 或 original_amount 字段
+		if key == "discount" || key == "original_amount" {
+			// 只有当两个字段都存在时才添加
+			if hasDiscount && hasOriginalAmount {
+				metadataKey := strings.ReplaceAll(key, "_", "-")
+				fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, value)
+			}
+		} else {
+			// 其他字段正常处理
 			metadataKey := strings.ReplaceAll(key, "_", "-")
 			fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, value)
 		}
