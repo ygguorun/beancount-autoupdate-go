@@ -433,8 +433,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		Tags:           parseResult.Tags,
 		Postings:       parseResult.Postings,
 		OrderID:        parseResult.OrderID,
-		Discount:       parseResult.Discount,
-		OriginalAmount: parseResult.OriginalAmount,
+		Extra:          parseResult.Extra,
 		ImageURL:       "",
 		TempImageURL:   uploadResult,
 		TempWebDAVPath: tempWebDAVPath,
@@ -709,11 +708,13 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 	}
 
 	builder.WriteString("\n💰 金额信息:\n")
-	if data.OriginalAmount != "" {
-		builder.WriteString(fmt.Sprintf("  原始金额: %s CNY\n", data.OriginalAmount))
-	}
-	if data.Discount != "" {
-		builder.WriteString(fmt.Sprintf("  优惠总额: %s CNY\n", data.Discount))
+	if data.Extra != nil {
+		if data.Extra["original_amount"] != "" {
+			builder.WriteString(fmt.Sprintf("  原始金额: %s CNY\n", data.Extra["original_amount"]))
+		}
+		if data.Extra["discount"] != "" {
+			builder.WriteString(fmt.Sprintf("  优惠总额: %s CNY\n", data.Extra["discount"]))
+		}
 	}
 
 	if len(data.Tags) > 0 {
@@ -1134,10 +1135,8 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 		data.Tags,
 		data.Postings,
 		data.OrderID,
-		data.Discount,
-		data.OriginalAmount,
 		finalImageURL,
-		nil,
+		data.Extra,
 	)
 
 	if err != nil {
