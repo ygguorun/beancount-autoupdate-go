@@ -94,7 +94,7 @@ Example 1 (Platform Expense):
   "datetime": "2026-01-24 12:10:00",
   "flag": "*",
   "payee": "美团",
-  "narration": "支出(外卖): 望京小腰 - 羊肉串套餐",
+  "narration": "支出(餐饮): 望京小腰 - 羊肉串套餐",
   "extra": {{
     "sub_merchant": "望京小腰(酒仙桥店)",
     "product_names": "羊肉串套餐, 可乐",
@@ -103,7 +103,7 @@ Example 1 (Platform Expense):
   }},
   "postings": [
     {{
-      "account": "Expenses:FoodAndDrink:外卖",
+      "account": "Expenses:FoodAndDrink:食品饮料",
       "amount": "39.50",
       "currency": "CNY"
     }},
