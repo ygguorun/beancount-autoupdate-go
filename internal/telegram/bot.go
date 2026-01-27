@@ -424,20 +424,21 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	// 存储待确认的交易
 	b.mu.Lock()
 	b.pendingTx[userID] = &beancount.PendingTransaction{
-		UserID:            userID,
-		Date:              transactionTime.Format("2006-01-02"),
-		Time:              transactionTime.Format("15:04:05"),
-		Flag:              parseResult.Flag,
-		Payee:             parseResult.Payee,
-		Narration:         parseResult.Narration,
-		Tags:              parseResult.Tags,
-		Postings:          parseResult.Postings,
-		OrderID:           parseResult.OrderID,
-		Extra:             parseResult.Extra,
-		ImageURL:          "",
-		TempImageURL:      uploadResult,
-		TempWebDAVPath:    tempWebDAVPath,
-		SpecialDirectives: parseResult.SpecialDirectives,
+		UserID:                userID,
+		Date:                  transactionTime.Format("2006-01-02"),
+		Time:                  transactionTime.Format("15:04:05"),
+		Flag:                  parseResult.Flag,
+		Payee:                 parseResult.Payee,
+		Narration:             parseResult.Narration,
+		Tags:                  parseResult.Tags,
+		Postings:              parseResult.Postings,
+		OrderID:               parseResult.OrderID,
+		Extra:                 parseResult.Extra,
+		ImageURL:              "",
+		TempImageURL:          uploadResult,
+		TempWebDAVPath:        tempWebDAVPath,
+		SpecialDirectives:     parseResult.SpecialDirectives,
+		UserOriginalMessageID: message.MessageID,
 	}
 	b.mu.Unlock()
 
@@ -1235,18 +1236,42 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 			logger.Infof("删除所有预览消息: %v", data.PreviousMessageIDs)
 			b.deleteMessages(userID, data.PreviousMessageIDs)
 		}
-		// 也删除原始预览消息
+		// 也删除原始预览消息（如果存在）
 		if data.OriginalMessageID > 0 {
 			logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
+			b.botAPI.Request(deleteMsg)
+		}
+		// 根据配置删除用户发送的原始图片消息
+		if b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
+			logger.Infof("删除用户发送的原始图片消息: %d", data.UserOriginalMessageID)
+			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
 			b.botAPI.Request(deleteMsg)
 		}
 	}
 	delete(b.pendingTx, userID)
 	b.mu.Unlock()
 
-	response := fmt.Sprintf("✅ 交易已成功记录！\n\n📝 条目内容：\n%s", entry)
-	b.sendMessageWithNilKeyboard(userID, response)
+	// 根据配置判断是否发送成功消息
+	hasDirectives := len(data.SpecialDirectives) > 0
+	sendMessage := false
+
+	if hasDirectives {
+		// 有特殊指令，使用 send_directive_confirmation_message 配置
+		sendMessage = b.config.Telegram.SendDirectiveConfirmationMessage
+		logger.Infof("特殊指令提交，SendDirectiveConfirmationMessage 配置: %v", sendMessage)
+	} else {
+		// 普通交易，使用 send_confirmation_message 配置
+		sendMessage = b.config.Telegram.SendConfirmationMessage
+		logger.Infof("普通交易提交，SendConfirmationMessage 配置: %v", sendMessage)
+	}
+
+	if sendMessage {
+		response := fmt.Sprintf("✅ 交易已成功记录！\n\n📝 条目内容：\n%s", entry)
+		b.sendMessageWithNilKeyboard(userID, response)
+	} else {
+		logger.Infof("根据配置跳过发送成功消息")
+	}
 }
 
 // cancelTransaction 取消交易

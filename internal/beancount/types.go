@@ -64,4 +64,5 @@ type PendingTransaction struct {
 	EditingPostingMessageID int      // 分录编辑界面的消息ID
 	PreviousMessageIDs      []int    // 之前需要删除的消息ID列表
 	SpecialDirectives       []string // 特殊指令，如 pad、balance 等
+	UserOriginalMessageID   int      // 用户发送图片的原始消息ID
 }
