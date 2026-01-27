@@ -322,7 +322,6 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		b.sendReply(message, "❌ 下载图片失败")
 		return
 	}
-	defer os.Remove(tempFile)
 
 	b.sendReply(message, "🔍 正在识别图片...")
 
@@ -400,13 +399,57 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 
 	if parseErr != nil {
 		logger.Errorf("解析图片失败: %v", parseErr)
-		b.sendReply(message, "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
+		// 保存临时文件信息以便重新识别
+		b.mu.Lock()
+		b.pendingTx[userID] = &beancount.PendingTransaction{
+			UserID:                userID,
+			OriginalTempFilePath:  tempFile,
+			TempImageURL:          uploadResult,
+			TempWebDAVPath:        tempWebDAVPath,
+			UserOriginalMessageID: message.MessageID,
+		}
+		b.mu.Unlock()
+
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）")
+		msg.ReplyMarkup = &keyboard
+		b.botAPI.Send(msg)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
-		b.sendReply(message, "❌ 无法识别图片中的交易信息")
+		// 保存临时文件信息以便重新识别
+		b.mu.Lock()
+		b.pendingTx[userID] = &beancount.PendingTransaction{
+			UserID:                userID,
+			OriginalTempFilePath:  tempFile,
+			TempImageURL:          uploadResult,
+			TempWebDAVPath:        tempWebDAVPath,
+			UserOriginalMessageID: message.MessageID,
+		}
+		b.mu.Unlock()
+
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ 无法识别图片中的交易信息")
+		msg.ReplyMarkup = &keyboard
+		b.botAPI.Send(msg)
 		return
 	}
 
@@ -439,6 +482,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		TempWebDAVPath:        tempWebDAVPath,
 		SpecialDirectives:     parseResult.SpecialDirectives,
 		UserOriginalMessageID: message.MessageID,
+		OriginalTempFilePath:  tempFile,
 	}
 	b.mu.Unlock()
 
@@ -606,6 +650,8 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.cancelTransaction(userID, query.Message.MessageID)
 	case "back_to_preview":
 		b.showTransactionPreview(userID, query.Message.MessageID)
+	case "rerun_recognition":
+		b.rerunRecognition(userID, query.Message.MessageID)
 	case "back_to_edit_posting":
 		b.mu.RLock()
 		data := b.pendingTx[userID]
@@ -713,8 +759,11 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 		}
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-		// 简化的键盘：只有确认和取消
+		// 简化的键盘：包含确认、取消和重新识别
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
 				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
@@ -770,6 +819,9 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", "edit_postings"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
@@ -1248,6 +1300,14 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
 			b.botAPI.Request(deleteMsg)
 		}
+		// 删除本地临时图片文件
+		if data.OriginalTempFilePath != "" {
+			if err := os.Remove(data.OriginalTempFilePath); err != nil {
+				logger.Errorf("删除临时文件失败: %v", err)
+			} else {
+				logger.Infof("已删除临时文件: %s", data.OriginalTempFilePath)
+			}
+		}
 	}
 	delete(b.pendingTx, userID)
 	b.mu.Unlock()
@@ -1291,6 +1351,15 @@ func (b *Bot) cancelTransaction(userID, messageID int) {
 	// 删除临时文件
 	if data.TempWebDAVPath != "" && b.webdavMgr != nil {
 		b.webdavMgr.DeleteFile(data.TempWebDAVPath)
+	}
+
+	// 删除本地临时图片文件
+	if data.OriginalTempFilePath != "" {
+		if err := os.Remove(data.OriginalTempFilePath); err != nil {
+			logger.Errorf("删除临时文件失败: %v", err)
+		} else {
+			logger.Infof("已删除临时文件: %s", data.OriginalTempFilePath)
+		}
 	}
 
 	// 删除所有预览消息
@@ -1359,4 +1428,125 @@ func (b *Bot) addMessageID(userID int, messageID int) {
 		data.PreviousMessageIDs = append(data.PreviousMessageIDs, messageID)
 		logger.Infof("添加消息ID到PreviousMessageIDs: %d, 当前列表: %v", messageID, data.PreviousMessageIDs)
 	}
+}
+
+// rerunRecognition 重新识别图片
+func (b *Bot) rerunRecognition(userID, messageID int) {
+	logger.Infof("重新识别: userID=%d, messageID=%d", userID, messageID)
+
+	b.mu.Lock()
+	data, ok := b.pendingTx[userID]
+	b.mu.Unlock()
+
+	if !ok {
+		logger.Warnf("用户 %d 没有待确认的交易（在 rerunRecognition 中）", userID)
+		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
+		return
+	}
+
+	// 检查是否有临时文件路径
+	if data.OriginalTempFilePath == "" {
+		logger.Warnf("临时文件路径为空，无法重新识别")
+		b.sendMessageWithNilKeyboard(userID, "❌ 无法重新识别：原始图片文件不存在")
+		return
+	}
+
+	// 检查临时文件是否存在
+	if _, err := os.Stat(data.OriginalTempFilePath); os.IsNotExist(err) {
+		logger.Errorf("临时文件不存在: %s", data.OriginalTempFilePath)
+		b.sendMessageWithNilKeyboard(userID, "❌ 无法重新识别：原始图片文件不存在")
+		return
+	}
+
+	// 发送重新识别的提示消息
+	b.sendMessageWithNilKeyboard(userID, "🔄 正在重新识别图片...")
+
+	// 执行 git pull，确保获取最新的资产账户信息
+	logger.Infof("执行 git pull 获取最新账户信息...")
+	if pulled, err := b.gitMgr.PullChanges(); err != nil {
+		logger.Errorf("Git pull 失败: %v", err)
+	} else if pulled {
+		logger.Infof("Git pull 成功，已更新本地文件")
+	} else {
+		logger.Infof("没有需要拉取的更改")
+	}
+
+	// 调用 LLM 重新解析图片
+	logger.Infof("开始调用 LLM 重新解析图片...")
+	accounts := b.beancountMgr.GetAllCategories()
+	allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
+
+	parseResult, err := b.llmParser.ParseImage(data.OriginalTempFilePath, accounts[beancount.AccountTypeExpenses], accounts[beancount.AccountTypeIncome], accounts[beancount.AccountTypeLiabilities], allAccounts, []string{})
+	if err != nil {
+		logger.Errorf("LLM 重新解析失败: %v", err)
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID), "❌ 重新识别失败\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
+		msg.ReplyMarkup = &keyboard
+		b.botAPI.Send(msg)
+		return
+	}
+
+	if parseResult == nil {
+		logger.Warnf("LLM 重新解析返回空结果")
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息")
+		msg.ReplyMarkup = &keyboard
+		b.botAPI.Send(msg)
+		return
+	}
+
+	logger.Infof("LLM 重新解析成功: payee=%s, narration=%s, postings=%d",
+		parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
+
+	// 解析日期
+	transactionTime, err := b.llmParser.ParseTime(parseResult.DateTime)
+	if err != nil {
+		logger.Warnf("解析日期失败: %v，使用当前时间", err)
+		transactionTime = time.Now()
+	} else {
+		logger.Infof("解析日期成功: %s", transactionTime.Format("2006-01-02 15:04:05"))
+	}
+
+	// 更新待确认的交易数据
+	b.mu.Lock()
+	if data, ok := b.pendingTx[userID]; ok {
+		data.Date = transactionTime.Format("2006-01-02")
+		data.Time = transactionTime.Format("15:04:05")
+		data.Flag = parseResult.Flag
+		data.Payee = parseResult.Payee
+		data.Narration = parseResult.Narration
+		data.Tags = parseResult.Tags
+		data.Postings = parseResult.Postings
+		data.OrderID = parseResult.OrderID
+		data.Extra = parseResult.Extra
+		data.SpecialDirectives = parseResult.SpecialDirectives
+		// 保留 OriginalMessageID 和 UserOriginalMessageID，重置其他消息ID
+		data.LastMessageID = messageID
+		data.EditingPostingIndex = -1
+		data.EditingPostingMessageID = 0
+		data.PreviousMessageIDs = []int{}
+	}
+	b.mu.Unlock()
+
+	logger.Infof("已更新待确认交易: userID=%d, payee=%s, narration=%s", userID, parseResult.Payee, parseResult.Narration)
+
+	// 显示新的预览
+	b.showTransactionPreview(userID, messageID)
+	logger.Infof("重新识别完成，显示新预览")
 }
