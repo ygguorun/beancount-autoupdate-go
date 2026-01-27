@@ -5,6 +5,15 @@ token = ""
 # 允许的用户 ID 列表（可选，留空则允许所有用户）
 allowed_user_ids = []
 
+# 是否在确认提交后删除用户发送的图片消息
+delete_user_message = false
+
+# 普通交易确认提交后是否发送成功消息
+send_confirmation_message = true
+
+# 特殊指令确认提交后是否发送成功消息
+send_directive_confirmation_message = true
+
 [llm]
 # LLM API 配置
 base_url = "https://xxx.com/api/"
