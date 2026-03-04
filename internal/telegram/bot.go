@@ -345,100 +345,14 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 	b.sendReply(message, builder.String())
 }
 
-// handleDocument 处理文档（图片文件）
-func (b *Bot) handleDocument(message *tgbotapi.Message) {
-	document := message.Document
-	userID := int(message.From.ID)
+// processImage 处理图片识别的公共逻辑
+func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string) {
+	b.sendReply(message, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
 
-	// 检查用户权限
-	if !b.config.IsUserAllowed(userID) {
-		b.sendReply(message, "❌ 您没有权限使用此机器人")
-		return
-	}
-
-	// 检查是否为图片文件
-	if !strings.HasPrefix(document.MimeType, "image/") {
-		b.sendReply(message, "❌ 仅支持图片文件")
-		return
-	}
-
-	// 检查文件大小（限制 20MB）
-	if document.FileSize > 20*1024*1024 {
-		b.sendReply(message, "❌ 文件过大，请上传小于 20MB 的图片")
-		return
-	}
-
-	// 获取文件
-	fileConfig := tgbotapi.FileConfig{
-		FileID: document.FileID,
-	}
-
-	file, err := b.botAPI.GetFile(fileConfig)
-	if err != nil {
-		logger.Errorf("Failed to get document file: %v", err)
-		b.sendReply(message, "❌ 下载文件失败")
-		return
-	}
-
-	// 确定文件扩展名
-	ext := filepath.Ext(document.FileName)
-	if ext == "" {
-		// 从 MIME 类型推断扩展名
-		switch document.MimeType {
-		case "image/jpeg", "image/jpg":
-			ext = ".jpg"
-		case "image/png":
-			ext = ".png"
-		case "image/gif":
-			ext = ".gif"
-		case "image/webp":
-			ext = ".webp"
-		default:
-			ext = ".jpg" // 默认使用 jpg
-		}
-	}
-
-	// 创建临时文件
-	tempDir := os.TempDir()
-	tempFile := filepath.Join(tempDir, fmt.Sprintf("temp_doc_%d_%d%s", time.Now().Unix(), userID, ext))
-
-	// 下载文件 - 使用正确的 Telegram Bot API URL
-	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.botAPI.Token, file.FilePath)
-	resp, err := http.Get(fileURL)
-	if err != nil {
-		logger.Errorf("Failed to download document: %v", err)
-		b.sendReply(message, "❌ 下载文件失败")
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		logger.Errorf("Failed to download document, status: %d", resp.StatusCode)
-		b.sendReply(message, "❌ 下载文件失败")
-		return
-	}
-
-	// 保存到临时文件
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		logger.Errorf("Failed to read document: %v", err)
-		b.sendReply(message, "❌ 下载文件失败")
-		return
-	}
-
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
-		logger.Errorf("Failed to write document: %v", err)
-		b.sendReply(message, "❌ 下载文件失败")
-		return
-	}
-	defer os.Remove(tempFile)
-
-	b.sendReply(message, "🔍 正在识别图片文件...")
-
-	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
+	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
 	// 生成唯一的临时文件名，保留原始扩展名
-	tempFilename := fmt.Sprintf("temp_%s_%d%s", time.Now().Format("20060102_150405"), userID, ext)
+	tempFilename := fmt.Sprintf("temp_%s_%d%s", time.Now().Format("20060102_150405"), userID, fileExt)
 	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilename)
 	logger.Infof("生成的临时文件名: %s", tempFilename)
 	logger.Infof("临时 WebDAV 路径: %s", tempWebDAVPath)
@@ -453,7 +367,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		logger.Infof("开始上传图片文件到 WebDAV...")
+		logger.Infof("开始上传图片%s到 WebDAV...", sourceType)
 		if b.webdavMgr != nil && b.config.WebDAV.Enabled {
 			result, err := b.webdavMgr.UploadFile(tempFile, b.config.WebDAV.Path, tempFilename, time.Now(), "")
 			if err != nil {
@@ -482,7 +396,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 			logger.Infof("没有需要拉取的更改")
 		}
 
-		logger.Infof("开始调用 LLM 解析图片文件...")
+		logger.Infof("开始调用 LLM 解析图片%s...", sourceType)
 		accounts := b.beancountMgr.GetAllCategories()
 		allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
 
@@ -508,7 +422,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	logger.Infof("并发任务完成")
 
 	if parseErr != nil {
-		logger.Errorf("解析图片文件失败: %v", parseErr)
+		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
 		b.sendReply(message, "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
 		return
 	}
@@ -564,6 +478,101 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	// 显示预览（使用新的消息，不编辑原消息）
 	b.showTransactionPreview(userID, transactionID, 0)
 	logger.Infof("预览显示完成")
+}
+
+// handleDocument 处理文档（图片文件）
+func (b *Bot) handleDocument(message *tgbotapi.Message) {
+	document := message.Document
+	userID := int(message.From.ID)
+
+	// 检查用户权限
+	if !b.config.IsUserAllowed(userID) {
+		b.sendReply(message, "❌ 您没有权限使用此机器人")
+		return
+	}
+
+	// 检查是否为图片文件
+	if !strings.HasPrefix(document.MimeType, "image/") {
+		b.sendReply(message, "❌ 仅支持图片文件")
+		return
+	}
+
+	// 检查文件大小（限制 20MB）
+	if document.FileSize > 20*1024*1024 {
+		b.sendReply(message, "❌ 文件过大，请上传小于 20MB 的图片")
+		return
+	}
+
+	// 获取文件
+	fileConfig := tgbotapi.FileConfig{
+		FileID: document.FileID,
+	}
+
+	file, err := b.botAPI.GetFile(fileConfig)
+	if err != nil {
+		logger.Errorf("Failed to get document file: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	// 确定文件扩展名
+	ext := filepath.Ext(document.FileName)
+	if ext == "" {
+		// 从 MIME 类型推断扩展名
+		switch document.MimeType {
+		case "image/jpeg", "image/jpg":
+			ext = ".jpg"
+		case "image/png":
+			ext = ".png"
+		case "image/gif":
+			ext = ".gif"
+		case "image/webp":
+			ext = ".webp"
+		default:
+			logger.Warnf("Unknown MIME type: %s", document.MimeType)
+			return
+		}
+	}
+
+	// 创建临时文件
+	tempDir := os.TempDir()
+	tempFile := filepath.Join(tempDir, fmt.Sprintf("temp_doc_%d_%d%s", time.Now().Unix(), userID, ext))
+
+	// 下载文件 - 使用正确的 Telegram Bot API URL
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.botAPI.Token, file.FilePath)
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		logger.Errorf("Failed to download document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Errorf("Failed to download document, status: %d", resp.StatusCode)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	// 保存到临时文件
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Errorf("Failed to read document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		logger.Errorf("Failed to write document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+	defer os.Remove(tempFile)
+
+	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
+
+	// 调用公共处理函数
+	b.processImage(message, userID, tempFile, ext, "文件")
 }
 
 // handlePhoto 处理照片
@@ -629,182 +638,10 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		return
 	}
 
-	b.sendReply(message, "🔍 正在识别图片...")
-
 	logger.Infof("开始处理用户 %d 的图片，文件: %s", userID, tempFile)
 
-	// 生成唯一的临时文件名，确保上传和重命名使用同一个文件名
-	tempFilename := fmt.Sprintf("temp_%s_%d.jpg", time.Now().Format("20060102_150405"), userID)
-	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilename)
-	logger.Infof("生成的临时文件名: %s", tempFilename)
-	logger.Infof("临时 WebDAV 路径: %s", tempWebDAVPath)
-
-	// 使用 goroutine 并发处理图片上传和解析
-	var wg sync.WaitGroup
-	var uploadResult string
-	var parseResult *beancount.TransactionData
-	var parseErr error
-
-	// 并发上传图片到 WebDAV
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		logger.Infof("开始上传图片到 WebDAV...")
-		if b.webdavMgr != nil && b.config.WebDAV.Enabled {
-			result, err := b.webdavMgr.UploadFile(tempFile, b.config.WebDAV.Path, tempFilename, time.Now(), "")
-			if err != nil {
-				logger.Errorf("WebDAV 上传失败: %v", err)
-			} else {
-				logger.Infof("WebDAV 上传成功: %s", result)
-				uploadResult = result
-			}
-		} else {
-			logger.Infof("WebDAV 未启用或未配置")
-		}
-	}()
-
-	// 并发解析图片
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		// 先执行 git pull，确保获取最新的资产账户信息
-		logger.Infof("执行 git pull 获取最新账户信息...")
-		if pulled, err := b.gitMgr.PullChanges(); err != nil {
-			logger.Errorf("Git pull 失败: %v", err)
-		} else if pulled {
-			logger.Infof("Git pull 成功，已更新本地文件")
-		} else {
-			logger.Infof("没有需要拉取的更改")
-		}
-
-		logger.Infof("开始调用 LLM 解析图片...")
-		accounts := b.beancountMgr.GetAllCategories()
-		allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
-
-		logger.Debugf("获取到账户数量: 资产=%d, 负债=%d, 支出=%d, 收入=%d",
-			len(accounts[beancount.AccountTypeAssets]),
-			len(accounts[beancount.AccountTypeLiabilities]),
-			len(accounts[beancount.AccountTypeExpenses]),
-			len(accounts[beancount.AccountTypeIncome]))
-
-		parseResult, parseErr = b.llmParser.ParseImage(tempFile, accounts[beancount.AccountTypeExpenses], accounts[beancount.AccountTypeIncome], accounts[beancount.AccountTypeLiabilities], allAccounts, []string{})
-		if parseErr != nil {
-			logger.Errorf("LLM 解析失败: %v", parseErr)
-		} else if parseResult == nil {
-			logger.Warnf("LLM 解析返回空结果")
-		} else {
-			logger.Debugf("LLM 解析成功: payee=%s, narration=%s, postings=%d",
-				parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
-		}
-	}()
-
-	logger.Infof("等待并发任务完成...")
-	wg.Wait()
-	logger.Infof("并发任务完成")
-
-	if parseErr != nil {
-		logger.Errorf("解析图片失败: %v", parseErr)
-		// 保存临时文件信息以便重新识别
-		b.mu.Lock()
-		b.pendingTx[userID] = &beancount.PendingTransaction{
-			UserID:                userID,
-			OriginalTempFilePath:  tempFile,
-			TempImageURL:          uploadResult,
-			TempWebDAVPath:        tempWebDAVPath,
-			UserOriginalMessageID: message.MessageID,
-		}
-		b.mu.Unlock()
-
-		// 发送带有重新识别选项的错误消息
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
-			),
-		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）")
-		msg.ReplyMarkup = &keyboard
-		b.botAPI.Send(msg)
-		return
-	}
-
-	if parseResult == nil {
-		logger.Warnf("解析结果为空")
-		// 保存临时文件信息以便重新识别
-		b.mu.Lock()
-		b.pendingTx[userID] = &beancount.PendingTransaction{
-			UserID:                userID,
-			OriginalTempFilePath:  tempFile,
-			TempImageURL:          uploadResult,
-			TempWebDAVPath:        tempWebDAVPath,
-			UserOriginalMessageID: message.MessageID,
-		}
-		b.mu.Unlock()
-
-		// 发送带有重新识别选项的错误消息
-		keyboard := tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
-			),
-		)
-		msg := tgbotapi.NewMessage(message.Chat.ID, "❌ 无法识别图片中的交易信息")
-		msg.ReplyMarkup = &keyboard
-		b.botAPI.Send(msg)
-		return
-	}
-
-	logger.Infof("解析成功，准备处理交易数据")
-
-	// 解析日期
-	transactionTime, err := b.llmParser.ParseTime(parseResult.DateTime)
-	if err != nil {
-		logger.Warnf("解析日期失败: %v，使用当前时间", err)
-		transactionTime = time.Now()
-	} else {
-		logger.Infof("解析日期成功: %s", transactionTime.Format("2006-01-02 15:04:05"))
-	}
-
-	// 生成唯一的交易ID
-	transactionID := fmt.Sprintf("%d_%s", userID, time.Now().Format("20060102150405"))
-
-	// 存储待确认的交易
-	b.mu.Lock()
-	if b.pendingTx[userID] == nil {
-		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
-	}
-	b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
-		TransactionID:         transactionID,
-		UserID:                userID,
-		Date:                  transactionTime.Format("2006-01-02"),
-		Time:                  transactionTime.Format("15:04:05"),
-		Flag:                  parseResult.Flag,
-		Payee:                 parseResult.Payee,
-		Narration:             parseResult.Narration,
-		Tags:                  parseResult.Tags,
-		Postings:              parseResult.Postings,
-		OrderID:               parseResult.OrderID,
-		Extra:                 parseResult.Extra,
-		ImageURL:              "",
-		TempImageURL:          uploadResult,
-		TempWebDAVPath:        tempWebDAVPath,
-		SpecialDirectives:     parseResult.SpecialDirectives,
-		UserOriginalMessageID: message.MessageID,
-		OriginalTempFilePath:  tempFile,
-	}
-	b.mu.Unlock()
-
-	logger.Infof("已存储待确认交易: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
-	logger.Infof("准备显示预览")
-
-	// 显示预览（使用新的消息，不编辑原消息）
-	b.showTransactionPreview(userID, transactionID, 0)
-	logger.Infof("预览显示完成")
+	// 调用公共处理函数
+	b.processImage(message, userID, tempFile, ".jpg", "")
 }
 
 // handleTextInput 处理文本输入
