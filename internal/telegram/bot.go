@@ -30,7 +30,7 @@ type Bot struct {
 	webdavMgr       *webdav.Manager
 	botAPI          *tgbotapi.BotAPI
 	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
-	waitingForInput map[int]map[string]string                         // userID -> transactionID -> inputType
+	waitingForInput map[int]map[string]string                        // userID -> transactionID -> inputType
 	mu              sync.RWMutex
 }
 
@@ -457,7 +457,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		accounts := b.beancountMgr.GetAllCategories()
 		allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
 
-		logger.Infof("获取到账户数量: 资产=%d, 负债=%d, 支出=%d, 收入=%d",
+		logger.Debugf("获取到账户数量: 资产=%d, 负债=%d, 支出=%d, 收入=%d",
 			len(accounts[beancount.AccountTypeAssets]),
 			len(accounts[beancount.AccountTypeLiabilities]),
 			len(accounts[beancount.AccountTypeExpenses]),
@@ -469,7 +469,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		} else if parseResult == nil {
 			logger.Warnf("LLM 解析返回空结果")
 		} else {
-			logger.Infof("LLM 解析成功: payee=%s, narration=%s, postings=%d",
+			logger.Debugf("LLM 解析成功: payee=%s, narration=%s, postings=%d",
 				parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
 		}
 	}()
