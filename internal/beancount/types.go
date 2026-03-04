@@ -43,6 +43,7 @@ type TransactionData struct {
 
 // PendingTransaction 待确认的交易
 type PendingTransaction struct {
+	TransactionID           string   // 交易唯一标识符，用于支持多图片并发处理
 	UserID                  int
 	Date                    string
 	Time                    string

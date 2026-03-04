@@ -29,8 +29,8 @@ type Bot struct {
 	gitMgr          *git.Manager
 	webdavMgr       *webdav.Manager
 	botAPI          *tgbotapi.BotAPI
-	pendingTx       map[int]*beancount.PendingTransaction
-	waitingForInput map[int]string
+	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
+	waitingForInput map[int]map[string]string                         // userID -> transactionID -> inputType
 	mu              sync.RWMutex
 }
 
@@ -56,8 +56,8 @@ func NewBot(
 		gitMgr:          gitMgr,
 		webdavMgr:       webdavMgr,
 		botAPI:          botAPI,
-		pendingTx:       make(map[int]*beancount.PendingTransaction),
-		waitingForInput: make(map[int]string),
+		pendingTx:       make(map[int]map[string]*beancount.PendingTransaction),
+		waitingForInput: make(map[int]map[string]string),
 	}, nil
 }
 
@@ -143,6 +143,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 		b.handleAccountsCommand(message)
 	case "cancel":
 		b.handleCancelCommand(message)
+	case "pending":
+		b.handlePendingCommand(message)
 	default:
 		b.sendReply(message, "未知命令，请使用 /help 查看可用命令")
 	}
@@ -158,8 +160,16 @@ func (b *Bot) handleStartCommand(message *tgbotapi.Message) {
 /start - 显示欢迎信息
 /help - 显示帮助信息
 /accounts - 查看所有账户和分类
+/pending - 查看待处理的交易列表
+/cancel - 取消当前输入
 
 💡 使用流程：
+1. 发送账单截图（可连续发送多张）
+2. 查看识别结果
+3. 如需修改，点击相应按钮
+4. 确认后自动记账并同步到 Git
+
+📌 提示：使用 /pending 查看所有待处理的交易
 1. 发送账单截图
 2. 查看识别结果
 3. 如需修改，点击相应按钮
@@ -180,6 +190,11 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 - 识别结果会显示预览界面
 - 可以修改金额、账户、分类、备注等字段
 - 支持确认提交或取消操作
+
+🔄 多交易处理
+- 支持同时处理多张图片
+- 使用 /pending 查看待处理的交易列表
+- 每个交易独立管理，不会互相影响
 
 📝 记账规则
 - 支出：从资产账户到支出账户
@@ -231,15 +246,27 @@ func (b *Bot) handleCancelCommand(message *tgbotapi.Message) {
 	logger.Infof("处理 /cancel 命令: userID=%d", userID)
 
 	b.mu.Lock()
-	_, ok := b.waitingForInput[userID]
-	if ok {
-		delete(b.waitingForInput, userID)
+	var transactionID string
+	var inputType string
+	if txMap, ok := b.waitingForInput[userID]; ok && len(txMap) > 0 {
+		for tid, itype := range txMap {
+			transactionID = tid
+			inputType = itype
+			break
+		}
+	}
+
+	if transactionID != "" {
+		delete(b.waitingForInput[userID], transactionID)
+		if len(b.waitingForInput[userID]) == 0 {
+			delete(b.waitingForInput, userID)
+		}
 		b.mu.Unlock()
-		logger.Infof("已取消用户 %d 的输入等待", userID)
+		logger.Infof("已取消用户 %d 的输入等待: transactionID=%s, inputType=%s", userID, transactionID, inputType)
 
 		// 检查是否有待确认的交易，如果有则返回预览页面
 		b.mu.RLock()
-		data, hasPendingTx := b.pendingTx[userID]
+		data, hasPendingTx := b.pendingTx[userID][transactionID]
 		b.mu.RUnlock()
 
 		if hasPendingTx && data != nil {
@@ -249,7 +276,7 @@ func (b *Bot) handleCancelCommand(message *tgbotapi.Message) {
 				messageID = data.LastMessageID
 			}
 			logger.Infof("返回预览页面，使用 messageID=%d", messageID)
-			b.showTransactionPreview(userID, messageID)
+			b.showTransactionPreview(userID, transactionID, messageID)
 		} else {
 			b.sendReply(message, "❌ 已取消输入")
 		}
@@ -258,6 +285,60 @@ func (b *Bot) handleCancelCommand(message *tgbotapi.Message) {
 	b.mu.Unlock()
 
 	b.sendReply(message, "没有正在进行的操作")
+}
+
+// handlePendingCommand 处理 /pending 命令，显示待处理的交易列表
+func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
+	userID := int(message.From.ID)
+
+	logger.Infof("处理 /pending 命令: userID=%d", userID)
+
+	b.mu.RLock()
+	txMap, hasPending := b.pendingTx[userID]
+	b.mu.RUnlock()
+
+	if !hasPending || len(txMap) == 0 {
+		b.sendReply(message, "📋 当前没有待处理的交易")
+		return
+	}
+
+	var builder strings.Builder
+	builder.WriteString("📋 待处理的交易列表\n")
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+
+	// 遍历所有待处理的交易
+	i := 1
+	for transactionID, data := range txMap {
+		builder.WriteString(fmt.Sprintf("%d. %s %s\n", i, data.Date, data.Time))
+		builder.WriteString(fmt.Sprintf("   收款人: %s\n", data.Payee))
+		builder.WriteString(fmt.Sprintf("   描述: %s\n", data.Narration))
+
+		// 计算总金额
+		var totalAmount float64
+		for _, posting := range data.Postings {
+			if posting.Amount != "" {
+				var amount float64
+				if _, err := fmt.Sscanf(posting.Amount, "%f", &amount); err == nil {
+					if amount > 0 {
+						totalAmount += amount
+					}
+				}
+			}
+		}
+
+		if totalAmount > 0 {
+			builder.WriteString(fmt.Sprintf("   金额: %.2f CNY\n", totalAmount))
+		}
+
+		builder.WriteString(fmt.Sprintf("   ID: %s\n", transactionID))
+		builder.WriteString("\n")
+		i++
+	}
+
+	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+	builder.WriteString(fmt.Sprintf("共 %d 个待处理交易", len(txMap)))
+
+	b.sendReply(message, builder.String())
 }
 
 // handlePhoto 处理照片
@@ -464,9 +545,16 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		logger.Infof("解析日期成功: %s", transactionTime.Format("2006-01-02 15:04:05"))
 	}
 
+	// 生成唯一的交易ID
+	transactionID := fmt.Sprintf("%d_%s", userID, time.Now().Format("20060102150405"))
+
 	// 存储待确认的交易
 	b.mu.Lock()
-	b.pendingTx[userID] = &beancount.PendingTransaction{
+	if b.pendingTx[userID] == nil {
+		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
+	}
+	b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
+		TransactionID:         transactionID,
 		UserID:                userID,
 		Date:                  transactionTime.Format("2006-01-02"),
 		Time:                  transactionTime.Format("15:04:05"),
@@ -486,11 +574,11 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	}
 	b.mu.Unlock()
 
-	logger.Infof("已存储待确认交易: userID=%d, payee=%s, narration=%s", userID, parseResult.Payee, parseResult.Narration)
+	logger.Infof("已存储待确认交易: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
 	logger.Infof("准备显示预览")
 
 	// 显示预览（使用新的消息，不编辑原消息）
-	b.showTransactionPreview(userID, 0)
+	b.showTransactionPreview(userID, transactionID, 0)
 	logger.Infof("预览显示完成")
 }
 
@@ -502,38 +590,51 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 	logger.Infof("收到文本输入: userID=%d, text=%s", userID, text)
 
 	b.mu.RLock()
-	inputType, ok := b.waitingForInput[userID]
+	var transactionID string
+	var inputType string
+	// 查找用户是否有等待输入的交易
+	if txMap, ok := b.waitingForInput[userID]; ok && len(txMap) > 0 {
+		// 获取第一个（最新的）交易ID
+		for tid, itype := range txMap {
+			transactionID = tid
+			inputType = itype
+			break
+		}
+	}
 	b.mu.RUnlock()
 
-	if !ok {
+	if transactionID == "" {
 		logger.Infof("用户 %d 不在等待输入状态", userID)
 		return
 	}
 
-	logger.Infof("用户 %d 在等待输入: %s", userID, inputType)
+	logger.Infof("用户 %d 在等待输入: transactionID=%s, inputType=%s", userID, transactionID, inputType)
 
 	switch inputType {
 	case "posting_amount":
-		b.handlePostingAmountInput(userID, text)
+		b.handlePostingAmountInput(userID, transactionID, text)
 	case "narration":
-		b.handleNarrationInput(userID, text)
+		b.handleNarrationInput(userID, transactionID, text)
 	case "payee":
-		b.handlePayeeInput(userID, text)
+		b.handlePayeeInput(userID, transactionID, text)
 	}
 
 	b.mu.Lock()
-	delete(b.waitingForInput, userID)
+	delete(b.waitingForInput[userID], transactionID)
+	if len(b.waitingForInput[userID]) == 0 {
+		delete(b.waitingForInput, userID)
+	}
 	b.mu.Unlock()
 }
 
 // handlePostingAmountInput 处理分录金额输入
-func (b *Bot) handlePostingAmountInput(userID int, text string) {
+func (b *Bot) handlePostingAmountInput(userID int, transactionID string, text string) {
 	var messageID int
 	var posting beancount.PostingData
 	var editingPostingIndex int
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		if data.EditingPostingIndex >= 0 && data.EditingPostingIndex < len(data.Postings) {
 			// 更新金额
@@ -557,11 +658,11 @@ func (b *Bot) handlePostingAmountInput(userID int, text string) {
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏦 修改账户", "edit_posting_account"),
-			tgbotapi.NewInlineKeyboardButtonData("💰 修改金额", "edit_posting_amount"),
+			tgbotapi.NewInlineKeyboardButtonData("🏦 修改账户", fmt.Sprintf("%s:edit_posting_account", transactionID)),
+			tgbotapi.NewInlineKeyboardButtonData("💰 修改金额", fmt.Sprintf("%s:edit_posting_amount", transactionID)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔙 返回", "back_to_preview"),
+			tgbotapi.NewInlineKeyboardButtonData("🔙 返回", fmt.Sprintf("%s:back_to_preview", transactionID)),
 		),
 	)
 
@@ -575,11 +676,11 @@ func (b *Bot) handlePostingAmountInput(userID int, text string) {
 }
 
 // handleNarrationInput 处理描述输入
-func (b *Bot) handleNarrationInput(userID int, text string) {
+func (b *Bot) handleNarrationInput(userID int, transactionID string, text string) {
 	var messageID int
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.Narration = text
 		// 使用 OriginalMessageID 来编辑预览消息
@@ -591,17 +692,17 @@ func (b *Bot) handleNarrationInput(userID int, text string) {
 		return
 	}
 
-	b.showTransactionPreview(userID, messageID)
+	b.showTransactionPreview(userID, transactionID, messageID)
 }
 
 // handlePayeeInput 处理收款人输入
-func (b *Bot) handlePayeeInput(userID int, text string) {
-	logger.Infof("处理收款人输入: userID=%d, text=%s", userID, text)
+func (b *Bot) handlePayeeInput(userID int, transactionID string, text string) {
+	logger.Infof("处理收款人输入: userID=%d, transactionID=%s, text=%s", userID, transactionID, text)
 
 	var messageID int
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.Payee = text
 		logger.Infof("更新收款人: %s", text)
@@ -612,11 +713,11 @@ func (b *Bot) handlePayeeInput(userID int, text string) {
 	b.mu.Unlock()
 
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易（在 handlePayeeInput 中）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（在 handlePayeeInput 中）", userID, transactionID)
 		return
 	}
 
-	b.showTransactionPreview(userID, messageID)
+	b.showTransactionPreview(userID, transactionID, messageID)
 }
 
 // handleCallback 处理回调查询
@@ -631,42 +732,75 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 	callback := tgbotapi.NewCallback(query.ID, "")
 	b.botAPI.Request(callback)
 
+	// 从回调数据中提取 transactionID
+	var transactionID string
+	var action string
+	parts := strings.SplitN(callbackData, ":", 3)
+	if len(parts) >= 2 {
+		transactionID = parts[0]
+		action = parts[1]
+		// 如果还有更多部分，重新组合成 action
+		if len(parts) == 3 {
+			action = parts[1] + ":" + parts[2]
+		}
+	} else {
+		// 兼容旧格式（没有 transactionID 的回调）
+		action = callbackData
+		// 尝试获取最新的交易ID
+		b.mu.RLock()
+		if txMap, ok := b.pendingTx[userID]; ok && len(txMap) > 0 {
+			// 获取第一个（最新的）交易ID
+			for tid := range txMap {
+				transactionID = tid
+				break
+			}
+		}
+		b.mu.RUnlock()
+	}
+
+	if transactionID == "" {
+		logger.Warnf("无法从回调数据中提取 transactionID: %s", callbackData)
+		b.sendMessageWithNilKeyboard(userID, "❌ 无效的回调数据")
+		return
+	}
+
 	b.mu.RLock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	b.mu.RUnlock()
 
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
 	}
 
-	logger.Infof("找到待确认交易: payee=%s, narration=%s", data.Payee, data.Narration)
+	logger.Infof("找到待确认交易: transactionID=%s, payee=%s, narration=%s", transactionID, data.Payee, data.Narration)
 
-	switch callbackData {
+	switch action {
 	case "confirm":
-		b.confirmTransaction(userID, query.Message.MessageID)
+		b.confirmTransaction(userID, transactionID, query.Message.MessageID)
 	case "cancel":
-		b.cancelTransaction(userID, query.Message.MessageID)
+		b.cancelTransaction(userID, transactionID, query.Message.MessageID)
 	case "back_to_preview":
-		b.showTransactionPreview(userID, query.Message.MessageID)
-	case "rerun_recognition":
-		b.rerunRecognition(userID, query.Message.MessageID)
+		b.showTransactionPreview(userID, transactionID, query.Message.MessageID)
 	case "back_to_edit_posting":
 		b.mu.RLock()
-		data := b.pendingTx[userID]
+		data := b.pendingTx[userID][transactionID]
 		index := data.EditingPostingIndex
 		b.mu.RUnlock()
-		b.editPosting(userID, query.Message.MessageID, fmt.Sprintf("edit_posting:%d", index))
+		b.editPosting(userID, transactionID, query.Message.MessageID, fmt.Sprintf("%d", index))
 	case "edit_postings":
-		b.showPostingsEdit(userID, query.Message.MessageID)
+		b.showPostingsEdit(userID, transactionID, query.Message.MessageID)
 	case "edit_posting_account":
-		b.showPostingAccountSelection(userID, query.Message.MessageID)
+		b.showPostingAccountSelection(userID, transactionID, query.Message.MessageID)
 	case "edit_posting_amount":
-		logger.Infof("处理 edit_posting_amount 回调: userID=%d, messageID=%d", userID, query.Message.MessageID)
+		logger.Infof("处理 edit_posting_amount 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
 		b.mu.Lock()
-		b.waitingForInput[userID] = "posting_amount"
-		data := b.pendingTx[userID]
+		if b.waitingForInput[userID] == nil {
+			b.waitingForInput[userID] = make(map[string]string)
+		}
+		b.waitingForInput[userID][transactionID] = "posting_amount"
+		data := b.pendingTx[userID][transactionID]
 		data.LastMessageID = query.Message.MessageID
 		logger.Infof("设置 waitingForInput=posting_amount, LastMessageID=%d, OriginalMessageID=%d", data.LastMessageID, data.OriginalMessageID)
 		b.mu.Unlock()
@@ -674,10 +808,13 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的金额：\n取消请输入 /cancel")
 		b.botAPI.Send(msg)
 	case "edit_narration":
-		logger.Infof("处理 edit_narration 回调: userID=%d, messageID=%d", userID, query.Message.MessageID)
+		logger.Infof("处理 edit_narration 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
 		b.mu.Lock()
-		b.waitingForInput[userID] = "narration"
-		data := b.pendingTx[userID]
+		if b.waitingForInput[userID] == nil {
+			b.waitingForInput[userID] = make(map[string]string)
+		}
+		b.waitingForInput[userID][transactionID] = "narration"
+		data := b.pendingTx[userID][transactionID]
 		data.LastMessageID = query.Message.MessageID
 		logger.Infof("设置 waitingForInput=narration, LastMessageID=%d, OriginalMessageID=%d", data.LastMessageID, data.OriginalMessageID)
 		b.mu.Unlock()
@@ -685,10 +822,13 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的描述：\n取消请输入 /cancel")
 		b.botAPI.Send(msg)
 	case "edit_payee":
-		logger.Infof("处理 edit_payee 回调: userID=%d, messageID=%d", userID, query.Message.MessageID)
+		logger.Infof("处理 edit_payee 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
 		b.mu.Lock()
-		b.waitingForInput[userID] = "payee"
-		data := b.pendingTx[userID]
+		if b.waitingForInput[userID] == nil {
+			b.waitingForInput[userID] = make(map[string]string)
+		}
+		b.waitingForInput[userID][transactionID] = "payee"
+		data := b.pendingTx[userID][transactionID]
 		data.LastMessageID = query.Message.MessageID
 		logger.Infof("设置 waitingForInput=payee, LastMessageID=%d, OriginalMessageID=%d", data.LastMessageID, data.OriginalMessageID)
 		b.mu.Unlock()
@@ -696,15 +836,15 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的收款人：\n取消请输入 /cancel")
 		b.botAPI.Send(msg)
 	default:
-		if strings.HasPrefix(callbackData, "edit_posting:") {
-			b.editPosting(userID, query.Message.MessageID, callbackData)
-		} else if strings.HasPrefix(callbackData, "select_posting_account:") {
-			b.selectPostingAccount(userID, query.Message.MessageID, callbackData)
-		} else if strings.HasPrefix(callbackData, "account_page:") {
-			parts := strings.Split(callbackData, ":")
+		if strings.HasPrefix(action, "edit_posting:") {
+			b.editPosting(userID, transactionID, query.Message.MessageID, strings.TrimPrefix(action, "edit_posting:"))
+		} else if strings.HasPrefix(action, "select_posting_account:") {
+			b.selectPostingAccount(userID, transactionID, query.Message.MessageID, strings.TrimPrefix(action, "select_posting_account:"))
+		} else if strings.HasPrefix(action, "account_page:") {
+			parts := strings.Split(action, ":")
 			if len(parts) == 2 {
 				if page, err := strconv.Atoi(parts[1]); err == nil {
-					b.showAccountPage(userID, query.Message.MessageID, page)
+					b.showAccountPage(userID, transactionID, query.Message.MessageID, page)
 				}
 			}
 		}
@@ -712,11 +852,11 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 }
 
 // showTransactionPreview 显示交易预览
-func (b *Bot) showTransactionPreview(userID, messageID int) {
-	logger.Infof("showTransactionPreview: userID=%d, messageID=%d", userID, messageID)
+func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID int) {
+	logger.Infof("showTransactionPreview: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, messageID)
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.LastMessageID = messageID
 		// 如果 OriginalMessageID 为 0，则设置为当前 messageID
@@ -728,17 +868,17 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 	b.mu.Unlock()
 
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易（在 showTransactionPreview 中）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（在 showTransactionPreview 中）", userID, transactionID)
 		return
 	}
 
 	// 重新获取数据，确保数据是最新的
 	b.mu.RLock()
-	data, ok = b.pendingTx[userID]
+	data, ok = b.pendingTx[userID][transactionID]
 	b.mu.RUnlock()
 
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易（重新获取后）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（重新获取后）", userID, transactionID)
 		return
 	}
 
@@ -762,11 +902,8 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 		// 简化的键盘：包含确认、取消和重新识别
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 			),
 		)
 	} else {
@@ -814,18 +951,15 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 		// 完整的键盘：包含编辑选项
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("📝 修改描述", "edit_narration"),
-				tgbotapi.NewInlineKeyboardButtonData("🏪 修改收款人", "edit_payee"),
+				tgbotapi.NewInlineKeyboardButtonData("📝 修改描述", fmt.Sprintf("%s:edit_narration", transactionID)),
+				tgbotapi.NewInlineKeyboardButtonData("🏪 修改收款人", fmt.Sprintf("%s:edit_payee", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", "edit_postings"),
+				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", fmt.Sprintf("%s:edit_postings", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", "confirm"),
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 			),
 		)
 	}
@@ -843,7 +977,7 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 			newMsg.ReplyMarkup = &keyboard
 			if sentMsg, sendErr := b.botAPI.Send(newMsg); sendErr == nil {
 				b.mu.Lock()
-				if d, ok := b.pendingTx[userID]; ok {
+				if d, ok := b.pendingTx[userID][transactionID]; ok {
 					// 删除之前的消息
 					if len(d.PreviousMessageIDs) > 0 {
 						logger.Infof("删除之前的消息: %v", d.PreviousMessageIDs)
@@ -872,7 +1006,7 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 		sentMsg, err := b.botAPI.Send(msg)
 		if err == nil {
 			b.mu.Lock()
-			if d, ok := b.pendingTx[userID]; ok {
+			if d, ok := b.pendingTx[userID][transactionID]; ok {
 				// 删除之前的消息
 				if len(d.PreviousMessageIDs) > 0 {
 					logger.Infof("删除之前的消息: %v", d.PreviousMessageIDs)
@@ -894,9 +1028,9 @@ func (b *Bot) showTransactionPreview(userID, messageID int) {
 }
 
 // showPostingsEdit 显示分录编辑界面
-func (b *Bot) showPostingsEdit(userID, messageID int) {
+func (b *Bot) showPostingsEdit(userID int, transactionID string, messageID int) {
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.LastMessageID = messageID
 	}
@@ -926,7 +1060,7 @@ func (b *Bot) showPostingsEdit(userID, messageID int) {
 	for i := range data.Postings {
 		rows = append(rows, tgbotapi.NewInlineKeyboardButtonData(
 			fmt.Sprintf("分录 %d", i+1),
-			fmt.Sprintf("edit_posting:%d", i),
+			fmt.Sprintf("%s:edit_posting:%d", transactionID, i),
 		))
 	}
 
@@ -941,7 +1075,7 @@ func (b *Bot) showPostingsEdit(userID, messageID int) {
 	}
 
 	keyboardRows = append(keyboardRows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("🔙 返回", "back_to_preview"),
+		tgbotapi.NewInlineKeyboardButtonData("🔙 返回", fmt.Sprintf("%s:back_to_preview", transactionID)),
 	))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(keyboardRows...)
@@ -956,7 +1090,7 @@ func (b *Bot) showPostingsEdit(userID, messageID int) {
 		sentMsg, err := b.botAPI.Send(msg)
 		if err == nil {
 			b.mu.Lock()
-			if d, ok := b.pendingTx[userID]; ok {
+			if d, ok := b.pendingTx[userID][transactionID]; ok {
 				d.LastMessageID = sentMsg.MessageID
 			}
 			b.mu.Unlock()
@@ -965,19 +1099,14 @@ func (b *Bot) showPostingsEdit(userID, messageID int) {
 }
 
 // editPosting 编辑分录
-func (b *Bot) editPosting(userID, messageID int, callbackData string) {
-	parts := strings.Split(callbackData, ":")
-	if len(parts) != 2 {
-		return
-	}
-
-	index, err := strconv.Atoi(parts[1])
+func (b *Bot) editPosting(userID int, transactionID string, messageID int, indexStr string) {
+	index, err := strconv.Atoi(indexStr)
 	if err != nil {
 		return
 	}
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.EditingPostingIndex = index
 		data.LastMessageID = messageID
@@ -994,11 +1123,11 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🏦 修改账户", "edit_posting_account"),
-			tgbotapi.NewInlineKeyboardButtonData("💰 修改金额", "edit_posting_amount"),
+			tgbotapi.NewInlineKeyboardButtonData("🏦 修改账户", fmt.Sprintf("%s:edit_posting_account", transactionID)),
+			tgbotapi.NewInlineKeyboardButtonData("💰 修改金额", fmt.Sprintf("%s:edit_posting_amount", transactionID)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔙 返回", "back_to_preview"),
+			tgbotapi.NewInlineKeyboardButtonData("🔙 返回", fmt.Sprintf("%s:back_to_preview", transactionID)),
 		),
 	)
 
@@ -1007,7 +1136,7 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 		msg.ReplyMarkup = &keyboard
 		b.botAPI.Request(msg)
 		b.mu.Lock()
-		if d, ok := b.pendingTx[userID]; ok {
+		if d, ok := b.pendingTx[userID][transactionID]; ok {
 			d.EditingPostingMessageID = messageID
 		}
 		b.mu.Unlock()
@@ -1017,7 +1146,7 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 		sentMsg, err := b.botAPI.Send(msg)
 		if err == nil {
 			b.mu.Lock()
-			if d, ok := b.pendingTx[userID]; ok {
+			if d, ok := b.pendingTx[userID][transactionID]; ok {
 				d.LastMessageID = sentMsg.MessageID
 				d.EditingPostingMessageID = sentMsg.MessageID
 			}
@@ -1027,9 +1156,9 @@ func (b *Bot) editPosting(userID, messageID int, callbackData string) {
 }
 
 // showPostingAccountSelection 显示账户选择列表
-func (b *Bot) showPostingAccountSelection(userID, messageID int) {
+func (b *Bot) showPostingAccountSelection(userID int, transactionID string, messageID int) {
 	b.mu.RLock()
-	data := b.pendingTx[userID]
+	data := b.pendingTx[userID][transactionID]
 	b.mu.RUnlock()
 
 	if data.EditingPostingIndex < 0 || data.EditingPostingIndex >= len(data.Postings) {
@@ -1042,13 +1171,13 @@ func (b *Bot) showPostingAccountSelection(userID, messageID int) {
 	data.AvailableAccounts = allAccounts
 	data.AccountPage = 0
 
-	b.showAccountPage(userID, messageID, 0)
+	b.showAccountPage(userID, transactionID, messageID, 0)
 }
 
 // showAccountPage 显示账户分页
-func (b *Bot) showAccountPage(userID, messageID int, page int) {
+func (b *Bot) showAccountPage(userID int, transactionID string, messageID int, page int) {
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
 		data.AccountPage = page
 		data.LastMessageID = messageID
@@ -1081,7 +1210,7 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 		keyboardRows = append(keyboardRows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(
 				data.AvailableAccounts[i],
-				fmt.Sprintf("select_posting_account:%d", i),
+				fmt.Sprintf("%s:select_posting_account:%d", transactionID, i),
 			),
 		))
 	}
@@ -1089,10 +1218,10 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 	// 翻页按钮
 	var navRow []tgbotapi.InlineKeyboardButton
 	if page > 0 {
-		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("⬅️ 上一页", fmt.Sprintf("account_page:%d", page-1)))
+		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("⬅️ 上一页", fmt.Sprintf("%s:account_page:%d", transactionID, page-1)))
 	}
 	if end < len(data.AvailableAccounts) {
-		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("下一页 ➡️", fmt.Sprintf("account_page:%d", page+1)))
+		navRow = append(navRow, tgbotapi.NewInlineKeyboardButtonData("下一页 ➡️", fmt.Sprintf("%s:account_page:%d", transactionID, page+1)))
 	}
 	if len(navRow) > 0 {
 		keyboardRows = append(keyboardRows, navRow)
@@ -1100,7 +1229,7 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 
 	// 返回按钮
 	keyboardRows = append(keyboardRows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("🔙 返回", "back_to_edit_posting"),
+		tgbotapi.NewInlineKeyboardButtonData("🔙 返回", fmt.Sprintf("%s:back_to_edit_posting", transactionID)),
 	))
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(keyboardRows...)
@@ -1115,7 +1244,7 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 		sentMsg, err := b.botAPI.Send(msg)
 		if err == nil {
 			b.mu.Lock()
-			if d, ok := b.pendingTx[userID]; ok {
+			if d, ok := b.pendingTx[userID][transactionID]; ok {
 				d.LastMessageID = sentMsg.MessageID
 			}
 			b.mu.Unlock()
@@ -1124,19 +1253,14 @@ func (b *Bot) showAccountPage(userID, messageID int, page int) {
 }
 
 // selectPostingAccount 选择账户
-func (b *Bot) selectPostingAccount(userID, messageID int, callbackData string) {
-	parts := strings.Split(callbackData, ":")
-	if len(parts) != 2 {
-		return
-	}
-
-	index, err := strconv.Atoi(parts[1])
+func (b *Bot) selectPostingAccount(userID int, transactionID string, messageID int, indexStr string) {
+	index, err := strconv.Atoi(indexStr)
 	if err != nil {
 		return
 	}
 
 	b.mu.Lock()
-	data := b.pendingTx[userID]
+	data := b.pendingTx[userID][transactionID]
 	if index >= 0 && index < len(data.AvailableAccounts) {
 		if data.EditingPostingIndex >= 0 && data.EditingPostingIndex < len(data.Postings) {
 			data.Postings[data.EditingPostingIndex].Account = data.AvailableAccounts[index]
@@ -1144,18 +1268,18 @@ func (b *Bot) selectPostingAccount(userID, messageID int, callbackData string) {
 	}
 	b.mu.Unlock()
 
-	b.editPosting(userID, messageID, fmt.Sprintf("edit_posting:%d", data.EditingPostingIndex))
+	b.editPosting(userID, transactionID, messageID, fmt.Sprintf("%d", data.EditingPostingIndex))
 }
 
 // confirmTransaction 确认交易
-func (b *Bot) confirmTransaction(userID, messageID int) {
-	logger.Infof("确认交易: userID=%d", userID)
+func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int) {
+	logger.Infof("确认交易: userID=%d, transactionID=%s", userID, transactionID)
 
 	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if !ok {
 		b.mu.Unlock()
-		logger.Warnf("用户 %d 没有待确认的交易（在 confirmTransaction 中）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（在 confirmTransaction 中）", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
 	}
@@ -1282,7 +1406,7 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 
 	// 清除待确认交易并删除所有预览消息
 	b.mu.Lock()
-	if data, ok := b.pendingTx[userID]; ok {
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
 		// 删除所有预览消息
 		if len(data.PreviousMessageIDs) > 0 {
 			logger.Infof("删除所有预览消息: %v", data.PreviousMessageIDs)
@@ -1309,7 +1433,11 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 			}
 		}
 	}
-	delete(b.pendingTx, userID)
+	delete(b.pendingTx[userID], transactionID)
+	// 如果用户没有其他待确认交易，删除用户的 map
+	if len(b.pendingTx[userID]) == 0 {
+		delete(b.pendingTx, userID)
+	}
 	b.mu.Unlock()
 
 	// 根据配置判断是否发送成功消息
@@ -1335,15 +1463,15 @@ func (b *Bot) confirmTransaction(userID, messageID int) {
 }
 
 // cancelTransaction 取消交易
-func (b *Bot) cancelTransaction(userID, messageID int) {
-	logger.Infof("取消交易: userID=%d", userID)
+func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int) {
+	logger.Infof("取消交易: userID=%d, transactionID=%s", userID, transactionID)
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	data, ok := b.pendingTx[userID]
+	data, ok := b.pendingTx[userID][transactionID]
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易（在 cancelTransaction 中）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（在 cancelTransaction 中）", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
 	}
@@ -1374,8 +1502,12 @@ func (b *Bot) cancelTransaction(userID, messageID int) {
 		b.botAPI.Request(deleteMsg)
 	}
 
-	delete(b.pendingTx, userID)
-	logger.Infof("已删除待确认交易: userID=%d", userID)
+	delete(b.pendingTx[userID], transactionID)
+	// 如果用户没有其他待确认交易，删除用户的 map
+	if len(b.pendingTx[userID]) == 0 {
+		delete(b.pendingTx, userID)
+	}
+	logger.Infof("已删除待确认交易: userID=%d, transactionID=%s", userID, transactionID)
 	b.sendMessageWithNilKeyboard(userID, "❌ 交易已取消")
 }
 
@@ -1414,11 +1546,11 @@ func (b *Bot) deleteMessages(userID int, messageIDs []int) {
 }
 
 // addMessageID 添加消息ID到PreviousMessageIDs列表
-func (b *Bot) addMessageID(userID int, messageID int) {
+func (b *Bot) addMessageID(userID int, transactionID string, messageID int) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if data, ok := b.pendingTx[userID]; ok {
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
 		// 避免重复添加
 		for _, id := range data.PreviousMessageIDs {
 			if id == messageID {
