@@ -1438,6 +1438,11 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 	if len(b.pendingTx[userID]) == 0 {
 		delete(b.pendingTx, userID)
 	}
+	delete(b.pendingTx[userID], transactionID)
+	// 如果用户没有其他待确认交易，删除用户的 map
+	if len(b.pendingTx[userID]) == 0 {
+		delete(b.pendingTx, userID)
+	}
 	b.mu.Unlock()
 
 	// 根据配置判断是否发送成功消息
