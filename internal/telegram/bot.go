@@ -1630,15 +1630,15 @@ func (b *Bot) addMessageID(userID int, transactionID string, messageID int) {
 }
 
 // rerunRecognition 重新识别图片
-func (b *Bot) rerunRecognition(userID, messageID int) {
-	logger.Infof("重新识别: userID=%d, messageID=%d", userID, messageID)
+func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) {
+	logger.Infof("重新识别: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, messageID)
 
-	b.mu.Lock()
-	data, ok := b.pendingTx[userID]
-	b.mu.Unlock()
+	b.mu.RLock()
+	data, ok := b.pendingTx[userID][transactionID]
+	b.mu.RUnlock()
 
 	if !ok {
-		logger.Warnf("用户 %d 没有待确认的交易（在 rerunRecognition 中）", userID)
+		logger.Warnf("用户 %d 没有待确认的交易 %s（在 rerunRecognition 中）", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
 	}
@@ -1724,7 +1724,7 @@ func (b *Bot) rerunRecognition(userID, messageID int) {
 
 	// 更新待确认的交易数据
 	b.mu.Lock()
-	if data, ok := b.pendingTx[userID]; ok {
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
 		data.Date = transactionTime.Format("2006-01-02")
 		data.Time = transactionTime.Format("15:04:05")
 		data.Flag = parseResult.Flag
@@ -1743,9 +1743,9 @@ func (b *Bot) rerunRecognition(userID, messageID int) {
 	}
 	b.mu.Unlock()
 
-	logger.Infof("已更新待确认交易: userID=%d, payee=%s, narration=%s", userID, parseResult.Payee, parseResult.Narration)
+	logger.Infof("已更新待确认交易: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
 
 	// 显示新的预览
-	b.showTransactionPreview(userID, messageID)
+	b.showTransactionPreview(userID, transactionID, messageID)
 	logger.Infof("重新识别完成，显示新预览")
 }
