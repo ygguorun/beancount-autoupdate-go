@@ -3,6 +3,7 @@ package telegram
 import (
 	"fmt"
 	"io"
+	"math/rand"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -32,6 +33,7 @@ type Bot struct {
 	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
 	waitingForInput map[int]map[string]string                        // userID -> transactionID -> inputType
 	mu              sync.RWMutex
+	llmSemaphore    chan struct{} // LLM 信号量，控制并发调用
 }
 
 // NewBot 创建 Telegram Bot
@@ -58,6 +60,7 @@ func NewBot(
 		botAPI:          botAPI,
 		pendingTx:       make(map[int]map[string]*beancount.PendingTransaction),
 		waitingForInput: make(map[int]map[string]string),
+		llmSemaphore:    make(chan struct{}, 1), // 限制 LLM 并发为1
 	}, nil
 }
 
@@ -351,6 +354,9 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
+	// 生成唯一的交易ID，包含随机数以避免冲突
+	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.Intn(10000))
+
 	// 生成唯一的临时文件名，保留原始扩展名
 	tempFilename := fmt.Sprintf("temp_%s_%d%s", time.Now().Format("20060102_150405"), userID, fileExt)
 	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilename)
@@ -385,6 +391,10 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+
+		// 获取 LLM 信号量，控制并发
+		b.llmSemaphore <- struct{}{}
+		defer func() { <-b.llmSemaphore }()
 
 		// 先执行 git pull，确保获取最新的资产账户信息
 		logger.Infof("执行 git pull 获取最新账户信息...")
@@ -423,13 +433,63 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 	if parseErr != nil {
 		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
-		b.sendReply(message, "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
+		// 创建临时 pendingTx 以支持重新识别
+		b.mu.Lock()
+		if b.pendingTx[userID] == nil {
+			b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
+		}
+		b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
+			TransactionID:         transactionID,
+			UserID:                userID,
+			OriginalTempFilePath:  tempFile,
+			LastMessageID:         message.MessageID,
+			OriginalMessageID:     message.MessageID,
+		}
+		b.mu.Unlock()
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
+		msg.ReplyMarkup = &keyboard
+		msg.ReplyToMessageID = message.MessageID
+		b.botAPI.Send(msg)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
-		b.sendReply(message, "❌ 无法识别图片中的交易信息")
+		// 创建临时 pendingTx 以支持重新识别
+		b.mu.Lock()
+		if b.pendingTx[userID] == nil {
+			b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
+		}
+		b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
+			TransactionID:         transactionID,
+			UserID:                userID,
+			OriginalTempFilePath:  tempFile,
+			LastMessageID:         message.MessageID,
+			OriginalMessageID:     message.MessageID,
+		}
+		b.mu.Unlock()
+		// 发送带有重新识别选项的错误消息
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息")
+		msg.ReplyMarkup = &keyboard
+		msg.ReplyToMessageID = message.MessageID
+		b.botAPI.Send(msg)
 		return
 	}
 
@@ -443,9 +503,6 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	} else {
 		logger.Infof("解析日期成功: %s", transactionTime.Format("2006-01-02 15:04:05"))
 	}
-
-	// 生成唯一的交易ID
-	transactionID := fmt.Sprintf("%d_%s", userID, time.Now().Format("20060102150405"))
 
 	// 存储待确认的交易
 	b.mu.Lock()
@@ -464,6 +521,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		Postings:              parseResult.Postings,
 		OrderID:               parseResult.OrderID,
 		Extra:                 parseResult.Extra,
+		OriginalTempFilePath:  tempFile,
 		ImageURL:              "",
 		TempImageURL:          uploadResult,
 		TempWebDAVPath:        tempWebDAVPath,
@@ -964,6 +1022,9 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		// 简化的键盘：包含确认、取消和重新识别
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 			),
@@ -1018,6 +1079,9 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", fmt.Sprintf("%s:edit_postings", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
 				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
@@ -1659,6 +1723,10 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 
 	// 发送重新识别的提示消息
 	b.sendMessageWithNilKeyboard(userID, "🔄 正在重新识别图片...")
+
+	// 获取 LLM 信号量，控制并发
+	b.llmSemaphore <- struct{}{}
+	defer func() { <-b.llmSemaphore }()
 
 	// 执行 git pull，确保获取最新的资产账户信息
 	logger.Infof("执行 git pull 获取最新账户信息...")
