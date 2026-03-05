@@ -358,9 +358,9 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.Intn(10000))
 
 	// 生成唯一的临时文件名，保留原始扩展名
-	tempFilename := fmt.Sprintf("temp_%s_%d%s", time.Now().Format("20060102_150405"), userID, fileExt)
-	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilename)
-	logger.Infof("生成的临时文件名: %s", tempFilename)
+	tempFilenameTemplate := fmt.Sprintf("temp_{datetime}_{uuid}%s", fileExt)
+	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilenameTemplate)
+	logger.Infof("生成的临时文件名模板: %s", tempFilenameTemplate)
 	logger.Infof("临时 WebDAV 路径: %s", tempWebDAVPath)
 
 	// 使用 goroutine 并发处理图片上传和解析
@@ -375,7 +375,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		defer wg.Done()
 		logger.Infof("开始上传图片%s到 WebDAV...", sourceType)
 		if b.webdavMgr != nil && b.config.WebDAV.Enabled {
-			result, err := b.webdavMgr.UploadFile(tempFile, b.config.WebDAV.Path, tempFilename, time.Now(), "")
+			result, err := b.webdavMgr.UploadFile(tempFile, b.config.WebDAV.Path, tempFilenameTemplate, time.Now(), "")
 			if err != nil {
 				logger.Errorf("WebDAV 上传失败: %v", err)
 			} else {
