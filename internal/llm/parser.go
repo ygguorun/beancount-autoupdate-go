@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -27,7 +26,6 @@ type Parser struct {
 	apiKey       string
 	timeout      time.Duration
 	client       *http.Client
-	mu           sync.Mutex
 	extendPrompt string
 }
 
@@ -214,7 +212,11 @@ func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	// 读取响应
 	body, err := io.ReadAll(resp.Body)

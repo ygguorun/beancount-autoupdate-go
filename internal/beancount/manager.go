@@ -205,7 +205,10 @@ func (m *Manager) GetTransactionFilePath(date time.Time) string {
 
 	// 按年月组织：beans/YYYY/MM.bean
 	yearDir := filepath.Join(m.beansDir, fmt.Sprintf("%d", year))
-	os.MkdirAll(yearDir, 0755)
+	if err := os.MkdirAll(yearDir, 0755); err != nil {
+		logger.Errorf("创建目录失败: %v", err)
+		return ""
+	}
 
 	monthFile := filepath.Join(yearDir, fmt.Sprintf("%02d.bean", month))
 	return monthFile
@@ -363,32 +366,17 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 	return entry, nil
 }
 
-// ensureTransactionFileIncluded 确保交易文件已在主文件中包含
-func (m *Manager) ensureTransactionFileIncluded(filePath string) {
-	relativePath, err := filepath.Rel(m.dataDir, filePath)
-	if err != nil {
-		return
-	}
-
-	includeLine := fmt.Sprintf(`include "%s"`, relativePath)
-
-	content, err := os.ReadFile(m.mainFile)
-	if err != nil {
-		return
-	}
-
-	if !strings.Contains(string(content), includeLine) {
-		m.appendToFile(m.mainFile, fmt.Sprintf("\n%s\n", includeLine))
-	}
-}
-
 // appendToFile 追加内容到文件
 func (m *Manager) appendToFile(filePath, content string) error {
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			logger.Errorf("关闭文件失败: %v", closeErr)
+		}
+	}()
 
 	_, err = file.WriteString(content)
 	return err
