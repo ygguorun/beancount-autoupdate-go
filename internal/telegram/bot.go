@@ -1681,10 +1681,10 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 			),
 		)
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 重新识别失败\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
@@ -1698,10 +1698,10 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "rerun_recognition"),
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "cancel"),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 			),
 		)
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息")
