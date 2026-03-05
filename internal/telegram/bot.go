@@ -509,6 +509,16 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	}
 
 	// 存储待确认的交易
+	// 从上传结果中提取实际的 WebDAV 路径
+	actualTempWebDAVPath := tempWebDAVPath
+	if uploadResult != "" && b.config.WebDAV.URL != "" {
+		// 从 URL 中提取相对路径: https://dav.jianguoyun.com/dav/beancount/receipts/temp_xxx.jpg -> beancount/receipts/temp_xxx.jpg
+		urlPrefix := strings.TrimSuffix(b.config.WebDAV.URL, "/") + "/"
+		if strings.HasPrefix(uploadResult, urlPrefix) {
+			actualTempWebDAVPath = strings.TrimPrefix(uploadResult, urlPrefix)
+		}
+	}
+
 	b.mu.Lock()
 	if b.pendingTx[userID] == nil {
 		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
@@ -528,7 +538,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		OriginalTempFilePath:  tempFile,
 		ImageURL:              "",
 		TempImageURL:          uploadResult,
-		TempWebDAVPath:        tempWebDAVPath,
+		TempWebDAVPath:        actualTempWebDAVPath,
 		SpecialDirectives:     parseResult.SpecialDirectives,
 		UserOriginalMessageID: message.MessageID,
 	}
@@ -1572,12 +1582,24 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 			logger.Infof("删除所有预览消息: %v", data.PreviousMessageIDs)
 			b.deleteMessages(userID, data.PreviousMessageIDs)
 		}
-		// 也删除原始预览消息（如果存在）
+		// 也删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
 		if data.OriginalMessageID > 0 {
-			logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
-			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
-			if _, err := b.botAPI.Request(deleteMsg); err != nil {
-				logger.Errorf("删除消息失败: %v", err)
+			// 检查是否已经在 PreviousMessageIDs 中被删除
+			alreadyDeleted := false
+			for _, id := range data.PreviousMessageIDs {
+				if id == data.OriginalMessageID {
+					alreadyDeleted = true
+					break
+				}
+			}
+			if !alreadyDeleted {
+				logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
+				deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
+				if _, err := b.botAPI.Request(deleteMsg); err != nil {
+					logger.Errorf("删除消息失败: %v", err)
+				}
+			} else {
+				logger.Infof("原始预览消息 %d 已在 PreviousMessageIDs 中删除，跳过", data.OriginalMessageID)
 			}
 		}
 		// 根据配置删除用户发送的原始图片消息
