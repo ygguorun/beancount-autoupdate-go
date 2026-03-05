@@ -420,49 +420,6 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 	return true, nil
 }
 
-// setupRemoteAndPush 设置远程仓库并推送
-func (m *Manager) setupRemoteAndPush() error {
-	// 检查是否已有远程仓库
-	remote, err := m.repo.Remote("origin")
-	if err != nil {
-		// 添加远程仓库
-		_, err = m.repo.CreateRemote(&config.RemoteConfig{
-			Name: "origin",
-			URLs: []string{m.repoURL},
-		})
-		if err != nil {
-			return fmt.Errorf("failed to create remote: %w", err)
-		}
-		remote, err = m.repo.Remote("origin")
-		if err != nil {
-			return err
-		}
-	}
-
-	// 获取当前分支
-	ref, err := m.repo.Head()
-	if err != nil {
-		return err
-	}
-
-	branchName := ref.Name().Short()
-
-	// 设置上游分支并推送
-	pushOptions := &git.PushOptions{
-		RemoteName: "origin",
-		Auth:       m.getAuth(),
-		RefSpecs: []config.RefSpec{
-			config.RefSpec(fmt.Sprintf("refs/heads/%s:refs/heads/%s", branchName, branchName)),
-		},
-	}
-
-	if err := remote.Push(pushOptions); err != nil {
-		return fmt.Errorf("failed to push: %w", err)
-	}
-
-	return nil
-}
-
 // PushChanges 推送更改到远程仓库
 func (m *Manager) PushChanges() (bool, error) {
 	logger.Infof("开始执行 Git 推送...")

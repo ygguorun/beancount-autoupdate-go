@@ -2,7 +2,6 @@ package webdav
 
 import (
 	"bytes"
-	"crypto/rand"
 	"crypto/tls"
 	"encoding/xml"
 	"fmt"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"beancount-autoupdate/internal/logger"
 
 	"github.com/google/uuid"
 )
@@ -68,7 +69,11 @@ func (m *Manager) TestConnection() (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode == 207 || resp.StatusCode == 200 {
 		return true, nil
@@ -142,7 +147,11 @@ func (m *Manager) uploadBytes(data []byte, remotePath string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 201 && resp.StatusCode != 204 {
 		return fmt.Errorf("upload failed with status %d", resp.StatusCode)
@@ -225,7 +234,11 @@ func (m *Manager) createDirectory(directoryPath string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != 201 && resp.StatusCode != 405 {
 		return fmt.Errorf("failed to create directory with status %d", resp.StatusCode)
@@ -260,7 +273,11 @@ func (m *Manager) MoveFile(sourcePath, destinationPath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != 201 && resp.StatusCode != 204 {
 		return false, fmt.Errorf("failed to move file with status %d", resp.StatusCode)
@@ -286,7 +303,11 @@ func (m *Manager) DeleteFile(filePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != 200 && resp.StatusCode != 204 {
 		return false, fmt.Errorf("failed to delete file with status %d", resp.StatusCode)
@@ -306,7 +327,11 @@ func (m *Manager) fileExists(filePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	return resp.StatusCode == 200, nil
 }
@@ -326,21 +351,6 @@ func (m *Manager) createRequest(method, path string, body io.Reader) (*http.Requ
 	}
 
 	return req, nil
-}
-
-// generateUUID 生成 UUID
-func generateUUID() string {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	if err != nil {
-		// 如果随机数生成失败，使用时间戳作为后备
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-
-	b[6] = (b[6] & 0x0F) | 0x40 // Version 4
-	b[8] = (b[8] & 0x3F) | 0x80 // Variant 10
-
-	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
 }
 
 // WebDAVMultiStatus WebDAV 响应结构

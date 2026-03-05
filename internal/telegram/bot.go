@@ -235,9 +235,9 @@ func (b *Bot) handleAccountsCommand(message *tgbotapi.Message) {
 
 	for accountType, typeNames := range typeNames {
 		if accs, ok := accounts[accountType]; ok && len(accs) > 0 {
-			builder.WriteString(fmt.Sprintf("%s:\n", typeNames))
+			fmt.Fprintf(&builder, "%s:\n", typeNames)
 			for _, acc := range accs {
-				builder.WriteString(fmt.Sprintf("  • %s\n", acc))
+				fmt.Fprintf(&builder, "  • %s\n", acc)
 			}
 			builder.WriteString("\n")
 		}
@@ -316,9 +316,9 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 	// 遍历所有待处理的交易
 	i := 1
 	for transactionID, data := range txMap {
-		builder.WriteString(fmt.Sprintf("%d. %s %s\n", i, data.Date, data.Time))
-		builder.WriteString(fmt.Sprintf("   收款人: %s\n", data.Payee))
-		builder.WriteString(fmt.Sprintf("   描述: %s\n", data.Narration))
+		fmt.Fprintf(&builder, "%d. %s %s\n", i, data.Date, data.Time)
+		fmt.Fprintf(&builder, "   收款人: %s\n", data.Payee)
+		fmt.Fprintf(&builder, "   描述: %s\n", data.Narration)
 
 		// 计算总金额
 		var totalAmount float64
@@ -334,16 +334,16 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 		}
 
 		if totalAmount > 0 {
-			builder.WriteString(fmt.Sprintf("   金额: %.2f CNY\n", totalAmount))
+			fmt.Fprintf(&builder, "   金额: %.2f CNY\n", totalAmount)
 		}
 
-		builder.WriteString(fmt.Sprintf("   ID: %s\n", transactionID))
+		fmt.Fprintf(&builder, "   ID: %s\n", transactionID)
 		builder.WriteString("\n")
 		i++
 	}
 
 	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	builder.WriteString(fmt.Sprintf("共 %d 个待处理交易", len(txMap)))
+	fmt.Fprintf(&builder, "共 %d 个待处理交易", len(txMap))
 
 	b.sendReply(message, builder.String())
 }
@@ -439,11 +439,11 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
 		}
 		b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
-			TransactionID:         transactionID,
-			UserID:                userID,
-			OriginalTempFilePath:  tempFile,
-			LastMessageID:         message.MessageID,
-			OriginalMessageID:     message.MessageID,
+			TransactionID:        transactionID,
+			UserID:               userID,
+			OriginalTempFilePath: tempFile,
+			LastMessageID:        message.MessageID,
+			OriginalMessageID:    message.MessageID,
 		}
 		b.mu.Unlock()
 		// 发送带有重新识别选项的错误消息
@@ -458,7 +458,9 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
 		msg.ReplyMarkup = &keyboard
 		msg.ReplyToMessageID = message.MessageID
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 		return
 	}
 
@@ -470,11 +472,11 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
 		}
 		b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
-			TransactionID:         transactionID,
-			UserID:                userID,
-			OriginalTempFilePath:  tempFile,
-			LastMessageID:         message.MessageID,
-			OriginalMessageID:     message.MessageID,
+			TransactionID:        transactionID,
+			UserID:               userID,
+			OriginalTempFilePath: tempFile,
+			LastMessageID:        message.MessageID,
+			OriginalMessageID:    message.MessageID,
 		}
 		b.mu.Unlock()
 		// 发送带有重新识别选项的错误消息
@@ -489,7 +491,9 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息")
 		msg.ReplyMarkup = &keyboard
 		msg.ReplyToMessageID = message.MessageID
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 		return
 	}
 
@@ -604,7 +608,11 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 		b.sendReply(message, "❌ 下载文件失败")
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Errorf("Failed to download document, status: %d", resp.StatusCode)
@@ -625,7 +633,11 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 		b.sendReply(message, "❌ 下载文件失败")
 		return
 	}
-	defer os.Remove(tempFile)
+	defer func() {
+		if removeErr := os.Remove(tempFile); removeErr != nil {
+			logger.Errorf("删除临时文件失败: %v", removeErr)
+		}
+	}()
 
 	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
 
@@ -674,7 +686,11 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		b.sendReply(message, "❌ 下载图片失败")
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
 
 	if resp.StatusCode != http.StatusOK {
 		logger.Errorf("Failed to download file, status: %d", resp.StatusCode)
@@ -789,7 +805,11 @@ func (b *Bot) handlePostingAmountInput(userID int, transactionID string, text st
 	if messageID > 0 {
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, message)
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Request(msg)
+		if _, err := b.botAPI.Request(msg); err != nil {
+			logger.Errorf("编辑消息失败: %v", err)
+			// 如果编辑失败，尝试发送新消息
+			b.sendMessage(userID, message, keyboard)
+		}
 	} else {
 		b.sendMessage(userID, message, keyboard)
 	}
@@ -850,7 +870,9 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 
 	// 回答回调
 	callback := tgbotapi.NewCallback(query.ID, "")
-	b.botAPI.Request(callback)
+	if _, err := b.botAPI.Request(callback); err != nil {
+		logger.Errorf("回答回调失败: %v", err)
+	}
 
 	// 从回调数据中提取 transactionID
 	var transactionID string
@@ -903,6 +925,8 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.cancelTransaction(userID, transactionID, query.Message.MessageID)
 	case "back_to_preview":
 		b.showTransactionPreview(userID, transactionID, query.Message.MessageID)
+	case "rerun_recognition":
+		b.rerunRecognition(userID, transactionID, query.Message.MessageID)
 	case "back_to_edit_posting":
 		b.mu.RLock()
 		data := b.pendingTx[userID][transactionID]
@@ -926,7 +950,9 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的金额：\n取消请输入 /cancel")
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 	case "edit_narration":
 		logger.Infof("处理 edit_narration 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
 		b.mu.Lock()
@@ -940,7 +966,9 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的描述：\n取消请输入 /cancel")
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 	case "edit_payee":
 		logger.Infof("处理 edit_payee 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
 		b.mu.Lock()
@@ -954,7 +982,9 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的收款人：\n取消请输入 /cancel")
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 	default:
 		if strings.HasPrefix(action, "edit_posting:") {
 			b.editPosting(userID, transactionID, query.Message.MessageID, strings.TrimPrefix(action, "edit_posting:"))
@@ -1010,12 +1040,12 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		// 有特殊指令，只显示特殊指令
 		builder.WriteString("📋 特殊指令预览\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		builder.WriteString(fmt.Sprintf("日期: %s\n", data.Date))
-		builder.WriteString(fmt.Sprintf("时间: %s\n", data.Time))
-		builder.WriteString(fmt.Sprintf("描述: %s\n", data.Narration))
+		fmt.Fprintf(&builder, "日期: %s\n", data.Date)
+		fmt.Fprintf(&builder, "时间: %s\n", data.Time)
+		fmt.Fprintf(&builder, "描述: %s\n", data.Narration)
 		builder.WriteString("\n🔧 特殊指令:\n")
 		for i, directive := range data.SpecialDirectives {
-			builder.WriteString(fmt.Sprintf("  %d. %s\n", i+1, directive))
+			fmt.Fprintf(&builder, "  %d. %s\n", i+1, directive)
 		}
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -1033,28 +1063,28 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		// 没有特殊指令，显示标准交易预览
 		builder.WriteString("📋 交易预览\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-		builder.WriteString(fmt.Sprintf("日期: %s\n", data.Date))
-		builder.WriteString(fmt.Sprintf("时间: %s\n", data.Time))
-		builder.WriteString(fmt.Sprintf("标志: %s\n", data.Flag))
-		builder.WriteString(fmt.Sprintf("收款人: %s\n", data.Payee))
-		builder.WriteString(fmt.Sprintf("描述: %s\n", data.Narration))
+		fmt.Fprintf(&builder, "日期: %s\n", data.Date)
+		fmt.Fprintf(&builder, "时间: %s\n", data.Time)
+		fmt.Fprintf(&builder, "标志: %s\n", data.Flag)
+		fmt.Fprintf(&builder, "收款人: %s\n", data.Payee)
+		fmt.Fprintf(&builder, "描述: %s\n", data.Narration)
 
 		if data.OrderID != "" {
-			builder.WriteString(fmt.Sprintf("订单号: %s\n", data.OrderID))
+			fmt.Fprintf(&builder, "订单号: %s\n", data.OrderID)
 		}
 
 		builder.WriteString("\n💰 金额信息:\n")
 		if data.Extra != nil {
 			if data.Extra["original_amount"] != "" {
-				builder.WriteString(fmt.Sprintf("  原始金额: %s CNY\n", data.Extra["original_amount"]))
+				fmt.Fprintf(&builder, "  原始金额: %s CNY\n", data.Extra["original_amount"])
 			}
 			if data.Extra["discount"] != "" {
-				builder.WriteString(fmt.Sprintf("  优惠总额: %s CNY\n", data.Extra["discount"]))
+				fmt.Fprintf(&builder, "  优惠总额: %s CNY\n", data.Extra["discount"])
 			}
 		}
 
 		if len(data.Tags) > 0 {
-			builder.WriteString(fmt.Sprintf("\n标签: %s\n", strings.Join(data.Tags, ", ")))
+			fmt.Fprintf(&builder, "\n标签: %s\n", strings.Join(data.Tags, ", "))
 		}
 
 		builder.WriteString("\n分录:\n")
@@ -1067,7 +1097,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 			if currency == "" {
 				currency = "CNY"
 			}
-			builder.WriteString(fmt.Sprintf("  %d. %s: %s %s\n", i+1, posting.Account, amount, currency))
+			fmt.Fprintf(&builder, "  %d. %s: %s %s\n", i+1, posting.Account, amount, currency)
 		}
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -1094,11 +1124,9 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		logger.Infof("编辑消息: messageID=%d", messageID)
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, builder.String())
 		msg.ReplyMarkup = &keyboard
-		_, err := b.botAPI.Request(msg)
-		if err != nil {
+		if _, err := b.botAPI.Request(msg); err != nil {
 			logger.Errorf("编辑消息失败: %v", err)
 			// 如果编辑失败，尝试发送新消息
-			logger.Infof("尝试发送新消息")
 			newMsg := tgbotapi.NewMessage(int64(userID), builder.String())
 			newMsg.ReplyMarkup = &keyboard
 			if sentMsg, sendErr := b.botAPI.Send(newMsg); sendErr == nil {
@@ -1178,7 +1206,7 @@ func (b *Bot) showPostingsEdit(userID int, transactionID string, messageID int) 
 		if currency == "" {
 			currency = "CNY"
 		}
-		builder.WriteString(fmt.Sprintf("%d. %s: %s %s\n", i+1, posting.Account, amount, currency))
+		fmt.Fprintf(&builder, "%d. %s: %s %s\n", i+1, posting.Account, amount, currency)
 	}
 
 	// 构建按钮
@@ -1209,7 +1237,9 @@ func (b *Bot) showPostingsEdit(userID int, transactionID string, messageID int) 
 	if messageID > 0 {
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, builder.String())
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Request(msg)
+		if _, err := b.botAPI.Request(msg); err != nil {
+			logger.Errorf("编辑消息失败: %v", err)
+		}
 	} else {
 		msg := tgbotapi.NewMessage(int64(userID), builder.String())
 		msg.ReplyMarkup = &keyboard
@@ -1260,7 +1290,9 @@ func (b *Bot) editPosting(userID int, transactionID string, messageID int, index
 	if messageID > 0 {
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, message)
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Request(msg)
+		if _, err := b.botAPI.Request(msg); err != nil {
+			logger.Errorf("编辑消息失败: %v", err)
+		}
 		b.mu.Lock()
 		if d, ok := b.pendingTx[userID][transactionID]; ok {
 			d.EditingPostingMessageID = messageID
@@ -1323,10 +1355,10 @@ func (b *Bot) showAccountPage(userID int, transactionID string, messageID int, p
 	}
 
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("🏦 选择账户 (第 %d 页)\n\n", page+1))
+	fmt.Fprintf(&builder, "🏦 选择账户 (第 %d 页)\n\n", page+1)
 
 	for i := start; i < end; i++ {
-		builder.WriteString(fmt.Sprintf("%d. %s\n", i+1, data.AvailableAccounts[i]))
+		fmt.Fprintf(&builder, "%d. %s\n", i+1, data.AvailableAccounts[i])
 	}
 
 	var keyboardRows [][]tgbotapi.InlineKeyboardButton
@@ -1363,7 +1395,9 @@ func (b *Bot) showAccountPage(userID int, transactionID string, messageID int, p
 	if messageID > 0 {
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, builder.String())
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Request(msg)
+		if _, err := b.botAPI.Request(msg); err != nil {
+			logger.Errorf("编辑消息失败: %v", err)
+		}
 	} else {
 		msg := tgbotapi.NewMessage(int64(userID), builder.String())
 		msg.ReplyMarkup = &keyboard
@@ -1542,13 +1576,17 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 		if data.OriginalMessageID > 0 {
 			logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
-			b.botAPI.Request(deleteMsg)
+			if _, err := b.botAPI.Request(deleteMsg); err != nil {
+				logger.Errorf("删除消息失败: %v", err)
+			}
 		}
 		// 根据配置删除用户发送的原始图片消息
 		if b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
 			logger.Infof("删除用户发送的原始图片消息: %d", data.UserOriginalMessageID)
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
-			b.botAPI.Request(deleteMsg)
+			if _, err := b.botAPI.Request(deleteMsg); err != nil {
+				logger.Errorf("删除消息失败: %v", err)
+			}
 		}
 		// 删除本地临时图片文件
 		if data.OriginalTempFilePath != "" {
@@ -1609,7 +1647,9 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 
 	// 删除临时文件
 	if data.TempWebDAVPath != "" && b.webdavMgr != nil {
-		b.webdavMgr.DeleteFile(data.TempWebDAVPath)
+		if _, err := b.webdavMgr.DeleteFile(data.TempWebDAVPath); err != nil {
+			logger.Errorf("删除 WebDAV 文件失败: %v", err)
+		}
 	}
 
 	// 删除本地临时图片文件
@@ -1630,7 +1670,9 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 	if data.OriginalMessageID > 0 {
 		logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
 		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
-		b.botAPI.Request(deleteMsg)
+		if _, err := b.botAPI.Request(deleteMsg); err != nil {
+			logger.Errorf("删除消息失败: %v", err)
+		}
 	}
 
 	delete(b.pendingTx[userID], transactionID)
@@ -1646,7 +1688,9 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 func (b *Bot) sendReply(message *tgbotapi.Message, text string) {
 	msg := tgbotapi.NewMessage(message.Chat.ID, text)
 	msg.ReplyToMessageID = message.MessageID
-	b.botAPI.Send(msg)
+	if _, err := b.botAPI.Send(msg); err != nil {
+		logger.Errorf("发送消息失败: %v", err)
+	}
 }
 
 // sendMessage 发送消息
@@ -1656,14 +1700,18 @@ func (b *Bot) sendMessage(userID int, text string, keyboard tgbotapi.InlineKeybo
 		msg.ReplyMarkup = &keyboard
 	}
 	msg.ParseMode = ""
-	b.botAPI.Send(msg)
+	if _, err := b.botAPI.Send(msg); err != nil {
+		logger.Errorf("发送消息失败: %v", err)
+	}
 }
 
 // sendMessageWithNilKeyboard 发送不带键盘的消息
 func (b *Bot) sendMessageWithNilKeyboard(userID int, text string) {
 	msg := tgbotapi.NewMessage(int64(userID), text)
 	msg.ParseMode = ""
-	b.botAPI.Send(msg)
+	if _, err := b.botAPI.Send(msg); err != nil {
+		logger.Errorf("发送消息失败: %v", err)
+	}
 }
 
 // deleteMessages 删除指定的消息列表
@@ -1671,25 +1719,10 @@ func (b *Bot) deleteMessages(userID int, messageIDs []int) {
 	for _, messageID := range messageIDs {
 		if messageID > 0 {
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), messageID)
-			b.botAPI.Request(deleteMsg)
-		}
-	}
-}
-
-// addMessageID 添加消息ID到PreviousMessageIDs列表
-func (b *Bot) addMessageID(userID int, transactionID string, messageID int) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if data, ok := b.pendingTx[userID][transactionID]; ok {
-		// 避免重复添加
-		for _, id := range data.PreviousMessageIDs {
-			if id == messageID {
-				return
+			if _, err := b.botAPI.Request(deleteMsg); err != nil {
+				logger.Errorf("删除消息失败: %v", err)
 			}
 		}
-		data.PreviousMessageIDs = append(data.PreviousMessageIDs, messageID)
-		logger.Infof("添加消息ID到PreviousMessageIDs: %d, 当前列表: %v", messageID, data.PreviousMessageIDs)
 	}
 }
 
@@ -1757,7 +1790,9 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		)
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 重新识别失败\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 		return
 	}
 
@@ -1774,7 +1809,9 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		)
 		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息")
 		msg.ReplyMarkup = &keyboard
-		b.botAPI.Send(msg)
+		if _, err := b.botAPI.Send(msg); err != nil {
+			logger.Errorf("发送消息失败: %v", err)
+		}
 		return
 	}
 
