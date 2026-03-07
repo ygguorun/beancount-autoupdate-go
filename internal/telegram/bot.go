@@ -1131,20 +1131,21 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 	}
 
 	if messageID > 0 {
-		logger.Infof("编辑消息: messageID=%d", messageID)
+		logger.Infof("编辑消息: transactionID=%s, messageID=%d", transactionID, messageID)
 		msg := tgbotapi.NewEditMessageText(int64(userID), messageID, builder.String())
 		msg.ReplyMarkup = &keyboard
 		if _, err := b.botAPI.Request(msg); err != nil {
-			logger.Errorf("编辑消息失败: %v", err)
+			logger.Errorf("编辑消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, messageID, err)
 			// 如果编辑失败，尝试发送新消息
 			newMsg := tgbotapi.NewMessage(int64(userID), builder.String())
 			newMsg.ReplyMarkup = &keyboard
 			if sentMsg, sendErr := b.botAPI.Send(newMsg); sendErr == nil {
 				b.mu.Lock()
 				if d, ok := b.pendingTx[userID][transactionID]; ok {
-					// 删除之前的消息
+					logger.Infof("编辑失败，发送新消息: transactionID=%s, oldMessageID=%d, newMessageID=%d", transactionID, messageID, sentMsg.MessageID)
+					// 只删除当前交易相关的消息（不包括 messageID，因为编辑失败说明消息可能已不存在）
 					if len(d.PreviousMessageIDs) > 0 {
-						logger.Infof("删除之前的消息: %v", d.PreviousMessageIDs)
+						logger.Infof("删除当前交易 %s 的之前消息: %v", transactionID, d.PreviousMessageIDs)
 						b.deleteMessages(userID, d.PreviousMessageIDs)
 						d.PreviousMessageIDs = []int{}
 					}
@@ -1155,14 +1156,14 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 					if d.OriginalMessageID == 0 {
 						d.OriginalMessageID = sentMsg.MessageID
 					}
-					logger.Infof("发送新消息成功，更新 LastMessageID=%d, OriginalMessageID=%d", d.LastMessageID, d.OriginalMessageID)
+					logger.Infof("发送新消息成功: transactionID=%s, LastMessageID=%d, OriginalMessageID=%d, PreviousMessageIDs=%v", transactionID, d.LastMessageID, d.OriginalMessageID, d.PreviousMessageIDs)
 				}
 				b.mu.Unlock()
 			} else {
-				logger.Errorf("发送新消息也失败: %v", sendErr)
+				logger.Errorf("发送新消息也失败: transactionID=%s, error=%v", transactionID, sendErr)
 			}
 		} else {
-			logger.Infof("编辑消息成功")
+			logger.Infof("编辑消息成功: transactionID=%s, messageID=%d", transactionID, messageID)
 		}
 	} else {
 		msg := tgbotapi.NewMessage(int64(userID), builder.String())
@@ -1171,9 +1172,10 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		if err == nil {
 			b.mu.Lock()
 			if d, ok := b.pendingTx[userID][transactionID]; ok {
-				// 删除之前的消息
+				logger.Infof("发送新消息: transactionID=%s, messageID=%d", transactionID, sentMsg.MessageID)
+				// 只删除当前交易相关的消息
 				if len(d.PreviousMessageIDs) > 0 {
-					logger.Infof("删除之前的消息: %v", d.PreviousMessageIDs)
+					logger.Infof("删除当前交易 %s 的之前消息: %v", transactionID, d.PreviousMessageIDs)
 					b.deleteMessages(userID, d.PreviousMessageIDs)
 					d.PreviousMessageIDs = []int{}
 				}
@@ -1184,9 +1186,11 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 				if d.OriginalMessageID == 0 {
 					d.OriginalMessageID = sentMsg.MessageID
 				}
-				logger.Infof("发送新消息成功，更新 LastMessageID=%d, OriginalMessageID=%d", d.LastMessageID, d.OriginalMessageID)
+				logger.Infof("发送新消息成功: transactionID=%s, LastMessageID=%d, OriginalMessageID=%d, PreviousMessageIDs=%v", transactionID, d.LastMessageID, d.OriginalMessageID, d.PreviousMessageIDs)
 			}
 			b.mu.Unlock()
+		} else {
+			logger.Errorf("发送新消息失败: transactionID=%s, error=%v", transactionID, err)
 		}
 	}
 }
@@ -1576,12 +1580,17 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 
 	// 清除待确认交易并删除所有预览消息
 	b.mu.Lock()
-	if data, ok := b.pendingTx[userID][transactionID]; ok {
-		// 删除所有预览消息
+	data, ok = b.pendingTx[userID][transactionID]
+	if ok {
+		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d",
+			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID)
+
+		// 删除所有预览消息（只删除当前交易的消息）
 		if len(data.PreviousMessageIDs) > 0 {
-			logger.Infof("删除所有预览消息: %v", data.PreviousMessageIDs)
+			logger.Infof("删除当前交易 %s 的预览消息: %v", transactionID, data.PreviousMessageIDs)
 			b.deleteMessages(userID, data.PreviousMessageIDs)
 		}
+
 		// 也删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
 		if data.OriginalMessageID > 0 {
 			// 检查是否已经在 PreviousMessageIDs 中被删除
@@ -1593,41 +1602,45 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 				}
 			}
 			if !alreadyDeleted {
-				logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
+				logger.Infof("删除当前交易 %s 的原始预览消息: %d", transactionID, data.OriginalMessageID)
 				deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
 				if _, err := b.botAPI.Request(deleteMsg); err != nil {
-					logger.Errorf("删除消息失败: %v", err)
+					logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.OriginalMessageID, err)
 				}
 			} else {
-				logger.Infof("原始预览消息 %d 已在 PreviousMessageIDs 中删除，跳过", data.OriginalMessageID)
+				logger.Infof("当前交易 %s 的原始预览消息 %d 已在 PreviousMessageIDs 中删除，跳过", transactionID, data.OriginalMessageID)
 			}
 		}
+
 		// 根据配置删除用户发送的原始图片消息
 		if b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
-			logger.Infof("删除用户发送的原始图片消息: %d", data.UserOriginalMessageID)
+			logger.Infof("删除当前交易 %s 的用户原始图片消息: %d", transactionID, data.UserOriginalMessageID)
 			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
 			if _, err := b.botAPI.Request(deleteMsg); err != nil {
-				logger.Errorf("删除消息失败: %v", err)
+				logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.UserOriginalMessageID, err)
 			}
 		}
+
 		// 删除本地临时图片文件
 		if data.OriginalTempFilePath != "" {
 			if err := os.Remove(data.OriginalTempFilePath); err != nil {
-				logger.Errorf("删除临时文件失败: %v", err)
+				logger.Errorf("删除临时文件失败: transactionID=%s, path=%s, error=%v", transactionID, data.OriginalTempFilePath, err)
 			} else {
-				logger.Infof("已删除临时文件: %s", data.OriginalTempFilePath)
+				logger.Infof("已删除临时文件: transactionID=%s, path=%s", transactionID, data.OriginalTempFilePath)
 			}
 		}
-	}
-	delete(b.pendingTx[userID], transactionID)
-	// 如果用户没有其他待确认交易，删除用户的 map
-	if len(b.pendingTx[userID]) == 0 {
-		delete(b.pendingTx, userID)
-	}
-	delete(b.pendingTx[userID], transactionID)
-	// 如果用户没有其他待确认交易，删除用户的 map
-	if len(b.pendingTx[userID]) == 0 {
-		delete(b.pendingTx, userID)
+
+		// 从 pendingTx 中删除当前交易
+		delete(b.pendingTx[userID], transactionID)
+		logger.Infof("已从 pendingTx 中删除交易: transactionID=%s", transactionID)
+
+		// 如果用户没有其他待确认交易，删除用户的 map
+		if len(b.pendingTx[userID]) == 0 {
+			logger.Infof("用户 %d 没有其他待确认交易，删除用户 map", userID)
+			delete(b.pendingTx, userID)
+		}
+	} else {
+		logger.Warnf("交易不存在于 pendingTx 中: transactionID=%s", transactionID)
 	}
 	b.mu.Unlock()
 
@@ -1667,42 +1680,72 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 		return
 	}
 
-	// 删除临时文件
+	logger.Infof("取消交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d",
+		transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID)
+
+	// 删除 WebDAV 临时文件
 	if data.TempWebDAVPath != "" && b.webdavMgr != nil {
+		logger.Infof("删除 WebDAV 临时文件: transactionID=%s, path=%s", transactionID, data.TempWebDAVPath)
 		if _, err := b.webdavMgr.DeleteFile(data.TempWebDAVPath); err != nil {
-			logger.Errorf("删除 WebDAV 文件失败: %v", err)
+			logger.Errorf("删除 WebDAV 文件失败: transactionID=%s, path=%s, error=%v", transactionID, data.TempWebDAVPath, err)
 		}
 	}
 
 	// 删除本地临时图片文件
 	if data.OriginalTempFilePath != "" {
 		if err := os.Remove(data.OriginalTempFilePath); err != nil {
-			logger.Errorf("删除临时文件失败: %v", err)
+			logger.Errorf("删除临时文件失败: transactionID=%s, path=%s, error=%v", transactionID, data.OriginalTempFilePath, err)
 		} else {
-			logger.Infof("已删除临时文件: %s", data.OriginalTempFilePath)
+			logger.Infof("已删除临时文件: transactionID=%s, path=%s", transactionID, data.OriginalTempFilePath)
 		}
 	}
 
-	// 删除所有预览消息
+	// 删除所有预览消息（只删除当前交易的消息）
 	if len(data.PreviousMessageIDs) > 0 {
-		logger.Infof("删除所有预览消息: %v", data.PreviousMessageIDs)
+		logger.Infof("删除当前交易 %s 的预览消息: %v", transactionID, data.PreviousMessageIDs)
 		b.deleteMessages(userID, data.PreviousMessageIDs)
 	}
-	// 也删除原始预览消息
+
+	// 也删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
 	if data.OriginalMessageID > 0 {
-		logger.Infof("删除原始预览消息: %d", data.OriginalMessageID)
-		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
-		if _, err := b.botAPI.Request(deleteMsg); err != nil {
-			logger.Errorf("删除消息失败: %v", err)
+		// 检查是否已经在 PreviousMessageIDs 中被删除
+		alreadyDeleted := false
+		for _, id := range data.PreviousMessageIDs {
+			if id == data.OriginalMessageID {
+				alreadyDeleted = true
+				break
+			}
+		}
+		if !alreadyDeleted {
+			logger.Infof("删除当前交易 %s 的原始预览消息: %d", transactionID, data.OriginalMessageID)
+			deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.OriginalMessageID)
+			if _, err := b.botAPI.Request(deleteMsg); err != nil {
+				logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.OriginalMessageID, err)
+			}
+		} else {
+			logger.Infof("当前交易 %s 的原始预览消息 %d 已在 PreviousMessageIDs 中删除，跳过", transactionID, data.OriginalMessageID)
 		}
 	}
 
+	// 根据配置删除用户发送的原始图片消息
+	if b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
+		logger.Infof("删除当前交易 %s 的用户原始图片消息: %d", transactionID, data.UserOriginalMessageID)
+		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
+		if _, err := b.botAPI.Request(deleteMsg); err != nil {
+			logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.UserOriginalMessageID, err)
+		}
+	}
+
+	// 从 pendingTx 中删除当前交易
 	delete(b.pendingTx[userID], transactionID)
+	logger.Infof("已从 pendingTx 中删除交易: transactionID=%s", transactionID)
+
 	// 如果用户没有其他待确认交易，删除用户的 map
 	if len(b.pendingTx[userID]) == 0 {
+		logger.Infof("用户 %d 没有其他待确认交易，删除用户 map", userID)
 		delete(b.pendingTx, userID)
 	}
-	logger.Infof("已删除待确认交易: userID=%d, transactionID=%s", userID, transactionID)
+
 	b.sendMessageWithNilKeyboard(userID, "❌ 交易已取消")
 }
 
