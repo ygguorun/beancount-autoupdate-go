@@ -368,6 +368,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	var uploadResult string
 	var parseResult *beancount.TransactionData
 	var parseErr error
+	var parseHistory []beancount.ConversationMessage
 
 	// 并发上传图片到 WebDAV
 	wg.Add(1)
@@ -416,7 +417,8 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			len(accounts[beancount.AccountTypeExpenses]),
 			len(accounts[beancount.AccountTypeIncome]))
 
-		parseResult, parseErr = b.llmParser.ParseImage(tempFile, accounts[beancount.AccountTypeExpenses], accounts[beancount.AccountTypeIncome], accounts[beancount.AccountTypeLiabilities], allAccounts, []string{})
+		var history []beancount.ConversationMessage
+		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, []string{}, nil)
 		if parseErr != nil {
 			logger.Errorf("LLM 解析失败: %v", parseErr)
 		} else if parseResult == nil {
@@ -424,6 +426,8 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		} else {
 			logger.Infof("LLM 解析成功: payee=%s, narration=%s, postings=%d",
 				parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
+			// 保存对话历史以便后续使用
+			parseHistory = history
 		}
 	}()
 
@@ -449,6 +453,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -482,6 +487,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -541,6 +547,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		TempWebDAVPath:        actualTempWebDAVPath,
 		SpecialDirectives:     parseResult.SpecialDirectives,
 		UserOriginalMessageID: message.MessageID,
+		ConversationHistory:   parseHistory, // 保存对话历史
 	}
 	b.mu.Unlock()
 
@@ -763,6 +770,8 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 		b.handleNarrationInput(userID, transactionID, text)
 	case "payee":
 		b.handlePayeeInput(userID, transactionID, text)
+	case "guidance":
+		b.handleGuidanceInput(userID, transactionID, text)
 	}
 
 	b.mu.Lock()
@@ -937,6 +946,8 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.showTransactionPreview(userID, transactionID, query.Message.MessageID)
 	case "rerun_recognition":
 		b.rerunRecognition(userID, transactionID, query.Message.MessageID)
+	case "guided_retry":
+		b.startGuidedRetry(userID, transactionID, query.Message.MessageID)
 	case "back_to_edit_posting":
 		b.mu.RLock()
 		data := b.pendingTx[userID][transactionID]
@@ -1062,6 +1073,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		// 简化的键盘：包含确认、取消和重新识别
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -1121,6 +1133,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 				tgbotapi.NewInlineKeyboardButtonData("✏️ 编辑分录", fmt.Sprintf("%s:edit_postings", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -1836,17 +1849,18 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		logger.Infof("没有需要拉取的更改")
 	}
 
-	// 调用 LLM 重新解析图片
+	// 调用 LLM 重新解析图片（清空历史，完全重新识别）
 	logger.Infof("开始调用 LLM 重新解析图片...")
 	accounts := b.beancountMgr.GetAllCategories()
 	allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
 
-	parseResult, err := b.llmParser.ParseImage(data.OriginalTempFilePath, accounts[beancount.AccountTypeExpenses], accounts[beancount.AccountTypeIncome], accounts[beancount.AccountTypeLiabilities], allAccounts, []string{})
+	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, []string{}, nil)
 	if err != nil {
 		logger.Errorf("LLM 重新解析失败: %v", err)
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -1866,6 +1880,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		// 发送带有重新识别选项的错误消息
 		keyboard := tgbotapi.NewInlineKeyboardMarkup(
 			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
 				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 			),
 			tgbotapi.NewInlineKeyboardRow(
@@ -1905,6 +1920,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		data.OrderID = parseResult.OrderID
 		data.Extra = parseResult.Extra
 		data.SpecialDirectives = parseResult.SpecialDirectives
+		data.ConversationHistory = newHistory // 更新对话历史
 		// 保留 OriginalMessageID 和 UserOriginalMessageID，重置其他消息ID
 		data.LastMessageID = messageID
 		data.EditingPostingIndex = -1
@@ -1918,4 +1934,184 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	// 显示新的预览
 	b.showTransactionPreview(userID, transactionID, messageID)
 	logger.Infof("重新识别完成，显示新预览")
+}
+
+// startGuidedRetry 开始引导重试流程
+func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) {
+	logger.Infof("开始引导重试: userID=%d, transactionID=%s", userID, transactionID)
+
+	b.mu.Lock()
+	if b.waitingForInput[userID] == nil {
+		b.waitingForInput[userID] = make(map[string]string)
+	}
+	b.waitingForInput[userID][transactionID] = "guidance"
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
+		data.LastMessageID = messageID
+	}
+	b.mu.Unlock()
+
+	var historyInfo string
+	b.mu.RLock()
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
+		if len(data.ConversationHistory) > 0 {
+			historyInfo = fmt.Sprintf("已尝试 %d 次", len(data.ConversationHistory))
+		}
+	}
+	b.mu.RUnlock()
+
+	prompt := "💬 请输入引导文字，描述您希望如何修正识别结果：\n\n" +
+		"例如：\n" +
+		"• 这是一笔打车支出，从微信支付\n" +
+		"• 金额应该是 35.00 元，不是 3.50 元\n" +
+		"• 这是超市购物，分类应该是 Expenses:FoodAndDrink\n" +
+		"• 收款人应该是美团，不是美团外卖\n\n"
+
+	if historyInfo != "" {
+		prompt += fmt.Sprintf("(%s)\n\n", historyInfo)
+	}
+
+	prompt += "取消请输入 /cancel"
+
+	msg := tgbotapi.NewMessage(int64(userID), prompt)
+	if _, err := b.botAPI.Send(msg); err != nil {
+		logger.Errorf("发送消息失败: %v", err)
+	}
+}
+
+// handleGuidanceInput 处理引导输入
+func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance string) {
+	logger.Infof("处理引导输入: userID=%d, transactionID=%s, guidance=%s", userID, transactionID, guidance)
+
+	b.mu.RLock()
+	data, ok := b.pendingTx[userID][transactionID]
+	b.mu.RUnlock()
+
+	if !ok {
+		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
+		return
+	}
+
+	// 检查临时文件
+	if data.OriginalTempFilePath == "" {
+		b.sendMessageWithNilKeyboard(userID, "❌ 无法重新识别：原始图片文件不存在")
+		return
+	}
+
+	// 发送处理中提示
+	b.sendMessageWithNilKeyboard(userID, "🔄 正在根据您的引导重新识别...")
+
+	// 获取 LLM 信号量
+	b.llmSemaphore <- struct{}{}
+	defer func() { <-b.llmSemaphore }()
+
+	// Git pull
+	if pulled, err := b.gitMgr.PullChanges(); err != nil {
+		logger.Errorf("Git pull 失败: %v", err)
+	} else if pulled {
+		logger.Infof("Git pull 成功")
+	}
+
+	// 获取账户信息
+	accounts := b.beancountMgr.GetAllCategories()
+	allAccounts := append(append(append(
+		accounts[beancount.AccountTypeAssets],
+		accounts[beancount.AccountTypeLiabilities]...),
+		accounts[beancount.AccountTypeExpenses]...),
+		accounts[beancount.AccountTypeIncome]...)
+
+	// 使用带引导的解析方法
+	parseResult, newHistory, err := b.llmParser.ParseWithGuidance(
+		data.OriginalTempFilePath,
+		allAccounts,
+		[]string{},
+		data.ConversationHistory,
+		guidance,
+	)
+
+	if err != nil {
+		logger.Errorf("引导重试失败: %v", err)
+		// 保留历史，允许继续重试
+		b.mu.Lock()
+		if d, ok := b.pendingTx[userID][transactionID]; ok {
+			// 添加用户引导到历史
+			d.ConversationHistory = append(d.ConversationHistory, beancount.ConversationMessage{
+				Role:    "user",
+				Content: guidance,
+			})
+		}
+		b.mu.Unlock()
+
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 继续引导", fmt.Sprintf("%s:guided_retry", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID),
+			fmt.Sprintf("❌ 引导重试失败: %v\n\n您可以继续输入引导文字或重新识别。", err))
+		msg.ReplyMarkup = &keyboard
+		if _, sendErr := b.botAPI.Send(msg); sendErr != nil {
+			logger.Errorf("发送消息失败: %v", sendErr)
+		}
+		return
+	}
+
+	if parseResult == nil {
+		logger.Warnf("引导重试返回空结果")
+		b.mu.Lock()
+		if d, ok := b.pendingTx[userID][transactionID]; ok {
+			d.ConversationHistory = append(d.ConversationHistory, beancount.ConversationMessage{
+				Role:    "user",
+				Content: guidance,
+			})
+		}
+		b.mu.Unlock()
+
+		keyboard := tgbotapi.NewInlineKeyboardMarkup(
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("💬 继续引导", fmt.Sprintf("%s:guided_retry", transactionID)),
+			),
+			tgbotapi.NewInlineKeyboardRow(
+				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
+			),
+		)
+		msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息\n\n您可以继续输入引导文字或重新识别。")
+		msg.ReplyMarkup = &keyboard
+		if _, sendErr := b.botAPI.Send(msg); sendErr != nil {
+			logger.Errorf("发送消息失败: %v", sendErr)
+		}
+		return
+	}
+
+	// 解析日期时间
+	transactionTime, err := b.llmParser.ParseTime(parseResult.DateTime)
+	if err != nil {
+		transactionTime = time.Now()
+	}
+
+	// 更新待确认交易
+	b.mu.Lock()
+	if d, ok := b.pendingTx[userID][transactionID]; ok {
+		d.Date = transactionTime.Format("2006-01-02")
+		d.Time = transactionTime.Format("15:04:05")
+		d.Flag = parseResult.Flag
+		d.Payee = parseResult.Payee
+		d.Narration = parseResult.Narration
+		d.Tags = parseResult.Tags
+		d.Postings = parseResult.Postings
+		d.OrderID = parseResult.OrderID
+		d.Extra = parseResult.Extra
+		d.SpecialDirectives = parseResult.SpecialDirectives
+		d.ConversationHistory = newHistory // 保存新历史
+	}
+	b.mu.Unlock()
+
+	logger.Infof("引导重试成功: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
+
+	// 显示新预览
+	b.showTransactionPreview(userID, transactionID, 0)
 }
