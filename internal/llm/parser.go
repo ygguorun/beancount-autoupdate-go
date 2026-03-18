@@ -1,16 +1,16 @@
 package llm
 
 import (
-	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 	"github.com/sirupsen/logrus"
 
 	"beancount-autoupdate/internal/beancount"
@@ -21,75 +21,84 @@ var logger = logrus.StandardLogger()
 
 // Parser LLM 解析器
 type Parser struct {
-	baseURL      string
+	client       openai.Client
 	model        string
-	apiKey       string
 	timeout      time.Duration
-	client       *http.Client
 	extendPrompt string
 }
 
 // NewParser 创建 LLM 解析器
 func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string) *Parser {
+	opts := []option.RequestOption{
+		option.WithAPIKey(apiKey),
+	}
+	if baseURL != "" {
+		opts = append(opts, option.WithBaseURL(baseURL))
+	}
+
 	return &Parser{
-		baseURL: baseURL,
-		model:   model,
-		apiKey:  apiKey,
-		timeout: time.Duration(timeout) * time.Second,
-		client: &http.Client{
-			Timeout: time.Duration(timeout) * time.Second,
-		},
+		client:       openai.NewClient(opts...),
+		model:        model,
+		timeout:      time.Duration(timeout) * time.Second,
 		extendPrompt: extendPrompt,
 	}
 }
 
 // ParseImage 解析图片中的交易信息
 func (p *Parser) ParseImage(imagePath string, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
+	result, _, err := p.ParseImageWithHistory(imagePath, accountNames, tagNames, nil)
+	return result, err
+}
+
+// ParseImageWithHistory 带对话历史的图片解析（支持重试）
+func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	// 编码图片
 	base64Image, err := p.encodeImage(imagePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to encode image: %w", err)
+		return nil, history, fmt.Errorf("failed to encode image: %w", err)
 	}
 
 	// 构建提示词
 	prompt := p.buildPrompt(accountNames, tagNames)
 
-	// 调用 LLM API
-	response, err := p.callLLM(prompt, base64Image)
+	// 构建消息列表
+	messages := p.buildMessages(prompt, base64Image, history)
+
+	// 尝试使用 Structured Outputs
+	transactionData, newHistory, err := p.callWithStructuredOutput(messages, history)
 	if err != nil {
-		return nil, fmt.Errorf("failed to call LLM: %w", err)
+		logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
+		// 降级：尝试普通 JSON 模式
+		transactionData, newHistory, err = p.callWithJSONMode(messages, history)
+		if err != nil {
+			return nil, history, fmt.Errorf("failed to parse response: %w", err)
+		}
 	}
 
-	// 解析响应
-	transactionData, err := p.parseResponse(response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
+	return transactionData, newHistory, nil
+}
 
-	return transactionData, nil
+// ParseWithGuidance 带引导文字的重新解析
+func (p *Parser) ParseWithGuidance(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage, userGuidance string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	// 添加用户引导到历史
+	history = append(history, beancount.ConversationMessage{
+		Role:    "user",
+		Content: userGuidance,
+	})
+
+	return p.ParseImageWithHistory(imagePath, accountNames, tagNames, history)
 }
 
 // ParseImageFromBytes 从字节数组解析图片
 func (p *Parser) ParseImageFromBytes(imageData []byte, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
-	// 编码图片
-	base64Image := base64.StdEncoding.EncodeToString(imageData)
-
-	// 构建提示词
-	prompt := p.buildPrompt(accountNames, tagNames)
-
-	// 调用 LLM API
-	response, err := p.callLLM(prompt, base64Image)
-	if err != nil {
-		return nil, fmt.Errorf("failed to call LLM: %w", err)
+	// 创建临时文件
+	tempFile := fmt.Sprintf("/tmp/beancount_temp_%d.jpg", time.Now().UnixNano())
+	if err := os.WriteFile(tempFile, imageData, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
+	defer os.Remove(tempFile)
 
-	// 解析响应
-	transactionData, err := p.parseResponse(response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse response: %w", err)
-	}
-
-	return transactionData, nil
+	return p.ParseImage(tempFile, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames)
 }
 
 // encodeImage 将图片编码为 base64
@@ -167,93 +176,187 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 	return prompt
 }
 
-// callLLM 调用 LLM API
-func (p *Parser) callLLM(prompt, base64Image string) (string, error) {
-	// 构建请求体
-	requestBody := map[string]interface{}{
-		"model": p.model,
-		"messages": []map[string]interface{}{
-			{
-				"role": "user",
-				"content": []map[string]interface{}{
-					{
-						"type": "text",
-						"text": prompt,
-					},
-					{
-						"type": "image_url",
-						"image_url": map[string]string{
-							"url": fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
-						},
-					},
+// buildMessages 构建 OpenAI API 消息列表
+func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.ConversationMessage) []openai.ChatCompletionMessageParamUnion {
+	var messages []openai.ChatCompletionMessageParamUnion
+
+	// 添加历史消息
+	for _, msg := range history {
+		switch msg.Role {
+		case "user":
+			messages = append(messages, openai.UserMessage(msg.Content))
+		case "assistant":
+			messages = append(messages, openai.AssistantMessage(msg.Content))
+		}
+	}
+
+	// 构建当前用户消息（包含图片）
+	if base64Image != "" {
+		// 使用 TextContentPart 和 ImageContentPart
+		content := []openai.ChatCompletionContentPartUnionParam{
+			openai.TextContentPart(prompt),
+			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+				URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
+			}),
+		}
+		messages = append(messages, openai.UserMessage(content))
+	} else {
+		messages = append(messages, openai.UserMessage(prompt))
+	}
+
+	return messages
+}
+
+// callWithStructuredOutput 使用 Structured Outputs 调用
+func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	completion, err := p.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model:    p.model,
+		Messages: messages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
+				JSONSchema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
+					Name:        "transaction_data",
+					Description: openai.String("Beancount transaction data"),
+					Schema:      generateTransactionSchema(),
+					Strict:      openai.Bool(true),
 				},
 			},
 		},
-	}
+	})
 
-	jsonBody, err := json.Marshal(requestBody)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	// 创建 HTTP 请求
-	url := p.baseURL + "/chat/completions"
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return "", fmt.Errorf("failed to create request: %w", err)
-	}
-
-	// 设置请求头
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-
-	// 发送请求
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to send request: %w", err)
-	}
-	defer func() {
-		if closeErr := resp.Body.Close(); closeErr != nil {
-			logger.Errorf("关闭响应体失败: %v", closeErr)
+		// 检查是否是不支持 Structured Outputs 的错误
+		if isStructuredOutputUnsupported(err) {
+			return nil, history, err // 触发降级
 		}
-	}()
-
-	// 读取响应
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read response: %w", err)
+		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
 
-	// 检查状态码
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	content := completion.Choices[0].Message.Content
+	if content == "" {
+		return nil, history, fmt.Errorf("empty response from LLM")
 	}
+
+	// 打印 LLM 返回值
+	logger.Infof("LLM Response (Structured Output): %s", content)
 
 	// 解析响应
-	var apiResponse struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
+	var transactionData beancount.TransactionData
+	if err := json.Unmarshal([]byte(content), &transactionData); err != nil {
+		return nil, history, fmt.Errorf("failed to unmarshal JSON: %w", err)
 	}
 
-	if err := json.Unmarshal(body, &apiResponse); err != nil {
-		return "", fmt.Errorf("failed to unmarshal response: %w", err)
+	// 检查是否为空对象
+	if transactionData.DateTime == "" && transactionData.Payee == "" && transactionData.Narration == "" {
+		return nil, history, fmt.Errorf("no transaction data found")
 	}
 
-	if len(apiResponse.Choices) == 0 {
-		return "", fmt.Errorf("no choices in response")
+	// 更新历史
+	newHistory := p.updateHistory(history, content)
+
+	return &transactionData, newHistory, nil
+}
+
+// callWithJSONMode 降级方案：使用普通 JSON 模式
+func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	completion, err := p.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model:    p.model,
+		Messages: messages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
+		},
+	})
+
+	if err != nil {
+		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
 
-	return apiResponse.Choices[0].Message.Content, nil
+	content := completion.Choices[0].Message.Content
+	if content == "" {
+		return nil, history, fmt.Errorf("empty response from LLM")
+	}
+
+	// 打印 LLM 返回值
+	logger.Infof("LLM Response (JSON Mode): %s", content)
+
+	// 使用现有的 parseResponse 方法处理响应
+	transactionData, err := p.parseResponse(content)
+	if err != nil {
+		return nil, history, err
+	}
+
+	newHistory := p.updateHistory(history, content)
+	return transactionData, newHistory, nil
+}
+
+// isStructuredOutputUnsupported 检查错误是否表示不支持 Structured Outputs
+func isStructuredOutputUnsupported(err error) bool {
+	errStr := strings.ToLower(err.Error())
+	return strings.Contains(errStr, "unsupported") ||
+		strings.Contains(errStr, "not supported") ||
+		strings.Contains(errStr, "invalid_request") ||
+		strings.Contains(errStr, "schema") ||
+		strings.Contains(errStr, "response_format")
+}
+
+// updateHistory 更新对话历史
+func (p *Parser) updateHistory(history []beancount.ConversationMessage, assistantResponse string) []beancount.ConversationMessage {
+	// 添加助手响应到历史
+	history = append(history, beancount.ConversationMessage{
+		Role:    "assistant",
+		Content: assistantResponse,
+	})
+	return history
+}
+
+// generateTransactionSchema 生成 TransactionData 的 JSON Schema
+func generateTransactionSchema() interface{} {
+	return map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"datetime":  map[string]string{"type": "string"},
+			"flag":      map[string]string{"type": "string"},
+			"payee":     map[string]string{"type": "string"},
+			"narration": map[string]string{"type": "string"},
+			"tags": map[string]interface{}{
+				"type":  "array",
+				"items": map[string]string{"type": "string"},
+			},
+			"postings": map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"account":  map[string]string{"type": "string"},
+						"amount":   map[string]string{"type": "string"},
+						"currency": map[string]string{"type": "string"},
+						"flag":     map[string]string{"type": "string"},
+					},
+					"required": []string{"account", "amount"},
+				},
+			},
+			"order_id": map[string]string{"type": "string"},
+			"extra": map[string]interface{}{
+				"type":                 "object",
+				"additionalProperties": map[string]string{"type": "string"},
+			},
+			"special_directives": map[string]interface{}{
+				"type":  "array",
+				"items": map[string]string{"type": "string"},
+			},
+		},
+		"required": []string{"datetime", "flag", "payee", "narration", "postings", "order_id", "extra", "special_directives"},
+	}
 }
 
 // parseResponse 解析 LLM 响应
 func (p *Parser) parseResponse(response string) (*beancount.TransactionData, error) {
-	// 打印 LLM 返回值
-	logger.Infof("LLM Response: %s", response)
-
 	// 提取 JSON（可能包含 markdown 代码块）
 	response = strings.TrimSpace(response)
 
