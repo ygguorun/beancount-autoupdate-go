@@ -11,13 +11,11 @@ import (
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
-	"github.com/sirupsen/logrus"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/embed"
+	"beancount-autoupdate/internal/logger"
 )
-
-var logger = logrus.StandardLogger()
 
 // Parser LLM 解析器
 type Parser struct {

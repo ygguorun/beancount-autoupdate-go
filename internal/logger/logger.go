@@ -129,3 +129,12 @@ func Fatalf(format string, args ...interface{}) {
 func WithError(err error) *logrus.Entry {
 	return GetLogger().WithError(err)
 }
+
+// SetLevel 设置日志级别
+func SetLevel(level string) {
+	logLevel, err := logrus.ParseLevel(level)
+	if err != nil {
+		logLevel = logrus.InfoLevel
+	}
+	GetLogger().SetLevel(logLevel)
+}

@@ -9,12 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sirupsen/logrus"
-
 	"beancount-autoupdate/internal/embed"
+	"beancount-autoupdate/internal/logger"
 )
-
-var logger = logrus.StandardLogger()
 
 // Manager Beancount 管理器
 type Manager struct {

@@ -7,8 +7,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/sirupsen/logrus"
-
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/config"
 	"beancount-autoupdate/internal/embed"
@@ -28,6 +26,7 @@ func main() {
 	// 定义命令行参数
 	configPath := flag.String("config", "", "配置文件路径 (默认: ./config.toml)")
 	version := flag.Bool("version", false, "显示版本信息")
+	debug := flag.Bool("d", false, "启用 debug 模式")
 	flag.Parse()
 
 	// 显示版本信息
@@ -40,7 +39,7 @@ func main() {
 
 	// 初始化嵌入的模板
 	if err := embed.InitTemplates(); err != nil {
-		logrus.Fatalf("Failed to initialize embedded templates: %v", err)
+		logger.Fatalf("Failed to initialize embedded templates: %v", err)
 	}
 
 	// 加载配置
@@ -70,6 +69,11 @@ func main() {
 	); err != nil {
 		fmt.Printf("❌ 初始化日志失败: %v\n", err)
 		os.Exit(1)
+	}
+
+	// 如果指定了 -d 参数，强制使用 debug 级别
+	if *debug {
+		logger.SetLevel("debug")
 	}
 
 	logger.Info("========================================")
