@@ -350,12 +350,20 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 
 // processImage 处理图片识别的公共逻辑
 func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string) {
-	b.sendReply(message, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
-
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
-	// 生成唯一的交易ID，包含随机数以避免冲突
+	// 先生成唯一的交易ID，包含随机数以避免冲突
 	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.Intn(10000))
+
+	// 发送识别提示消息，并追踪消息ID
+	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
+	msg.ReplyToMessageID = message.MessageID
+	var promptMessageID int
+	if sentMsg, err := b.botAPI.Send(msg); err != nil {
+		logger.Errorf("发送消息失败: %v", err)
+	} else {
+		promptMessageID = sentMsg.MessageID
+	}
 
 	// 生成唯一的临时文件名，保留原始扩展名
 	tempFilenameTemplate := fmt.Sprintf("temp_{datetime}_{uuid}%s", fileExt)
@@ -448,6 +456,11 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			OriginalTempFilePath: tempFile,
 			LastMessageID:        message.MessageID,
 			OriginalMessageID:    message.MessageID,
+			BotPromptMessageIDs:  []int{},
+		}
+		// 追踪识别提示消息
+		if promptMessageID > 0 {
+			b.pendingTx[userID][transactionID].BotPromptMessageIDs = append(b.pendingTx[userID][transactionID].BotPromptMessageIDs, promptMessageID)
 		}
 		b.mu.Unlock()
 		// 发送带有重新识别选项的错误消息
@@ -482,6 +495,11 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			OriginalTempFilePath: tempFile,
 			LastMessageID:        message.MessageID,
 			OriginalMessageID:    message.MessageID,
+			BotPromptMessageIDs:  []int{},
+		}
+		// 追踪识别提示消息
+		if promptMessageID > 0 {
+			b.pendingTx[userID][transactionID].BotPromptMessageIDs = append(b.pendingTx[userID][transactionID].BotPromptMessageIDs, promptMessageID)
 		}
 		b.mu.Unlock()
 		// 发送带有重新识别选项的错误消息
@@ -548,6 +566,11 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		SpecialDirectives:     parseResult.SpecialDirectives,
 		UserOriginalMessageID: message.MessageID,
 		ConversationHistory:   parseHistory, // 保存对话历史
+		BotPromptMessageIDs:   []int{},      // 初始化 Bot 提示消息 ID 列表
+	}
+	// 追踪识别提示消息
+	if promptMessageID > 0 {
+		b.pendingTx[userID][transactionID].BotPromptMessageIDs = append(b.pendingTx[userID][transactionID].BotPromptMessageIDs, promptMessageID)
 	}
 	b.mu.Unlock()
 
@@ -761,6 +784,9 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 		return
 	}
 
+	// 追踪用户输入的消息ID，用于后续删除
+	b.trackUserMessage(userID, transactionID, message.MessageID)
+
 	logger.Infof("用户 %d 在等待输入: transactionID=%s, inputType=%s", userID, transactionID, inputType)
 
 	switch inputType {
@@ -971,8 +997,10 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的金额：\n取消请输入 /cancel")
-		if _, err := b.botAPI.Send(msg); err != nil {
+		if sentMsg, err := b.botAPI.Send(msg); err != nil {
 			logger.Errorf("发送消息失败: %v", err)
+		} else {
+			b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 		}
 	case "edit_narration":
 		logger.Infof("处理 edit_narration 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
@@ -987,8 +1015,10 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的描述：\n取消请输入 /cancel")
-		if _, err := b.botAPI.Send(msg); err != nil {
+		if sentMsg, err := b.botAPI.Send(msg); err != nil {
 			logger.Errorf("发送消息失败: %v", err)
+		} else {
+			b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 		}
 	case "edit_payee":
 		logger.Infof("处理 edit_payee 回调: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, query.Message.MessageID)
@@ -1003,8 +1033,10 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.mu.Unlock()
 		// 发送新消息而不是编辑当前消息
 		msg := tgbotapi.NewMessage(int64(userID), "请输入新的收款人：\n取消请输入 /cancel")
-		if _, err := b.botAPI.Send(msg); err != nil {
+		if sentMsg, err := b.botAPI.Send(msg); err != nil {
 			logger.Errorf("发送消息失败: %v", err)
+		} else {
+			b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 		}
 	default:
 		if strings.HasPrefix(action, "edit_posting:") {
@@ -1595,13 +1627,25 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 	b.mu.Lock()
 	data, ok = b.pendingTx[userID][transactionID]
 	if ok {
-		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d",
-			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID)
+		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d, UserInputMessageIDs=%v, BotPromptMessageIDs=%v",
+			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID, data.UserInputMessageIDs, data.BotPromptMessageIDs)
 
 		// 删除所有预览消息（只删除当前交易的消息）
 		if len(data.PreviousMessageIDs) > 0 {
 			logger.Infof("删除当前交易 %s 的预览消息: %v", transactionID, data.PreviousMessageIDs)
 			b.deleteMessages(userID, data.PreviousMessageIDs)
+		}
+
+		// 删除用户输入的文本消息
+		if len(data.UserInputMessageIDs) > 0 {
+			logger.Infof("删除当前交易 %s 的用户输入消息: %v", transactionID, data.UserInputMessageIDs)
+			b.deleteMessages(userID, data.UserInputMessageIDs)
+		}
+
+		// 删除 Bot 发送的提示消息
+		if len(data.BotPromptMessageIDs) > 0 {
+			logger.Infof("删除当前交易 %s 的 Bot 提示消息: %v", transactionID, data.BotPromptMessageIDs)
+			b.deleteMessages(userID, data.BotPromptMessageIDs)
 		}
 
 		// 也删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
@@ -1783,12 +1827,15 @@ func (b *Bot) sendMessage(userID int, text string, keyboard tgbotapi.InlineKeybo
 	}
 }
 
-// sendMessageWithNilKeyboard 发送不带键盘的消息
-func (b *Bot) sendMessageWithNilKeyboard(userID int, text string) {
+// sendMessageWithNilKeyboard 发送不带键盘的消息，返回消息ID
+func (b *Bot) sendMessageWithNilKeyboard(userID int, text string) int {
 	msg := tgbotapi.NewMessage(int64(userID), text)
 	msg.ParseMode = ""
-	if _, err := b.botAPI.Send(msg); err != nil {
+	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
+		return 0
+	} else {
+		return sentMsg.MessageID
 	}
 }
 
@@ -1800,6 +1847,36 @@ func (b *Bot) deleteMessages(userID int, messageIDs []int) {
 			if _, err := b.botAPI.Request(deleteMsg); err != nil {
 				logger.Errorf("删除消息失败: %v", err)
 			}
+		}
+	}
+}
+
+// trackUserMessage 追踪用户输入的消息ID（用于后续删除）
+func (b *Bot) trackUserMessage(userID int, transactionID string, messageID int) {
+	if messageID <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if txMap, ok := b.pendingTx[userID]; ok {
+		if data, ok := txMap[transactionID]; ok {
+			data.UserInputMessageIDs = append(data.UserInputMessageIDs, messageID)
+			logger.Infof("追踪用户消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.UserInputMessageIDs))
+		}
+	}
+}
+
+// trackBotMessage 追踪Bot发送的提示消息ID（用于后续删除）
+func (b *Bot) trackBotMessage(userID int, transactionID string, messageID int) {
+	if messageID <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if txMap, ok := b.pendingTx[userID]; ok {
+		if data, ok := txMap[transactionID]; ok {
+			data.BotPromptMessageIDs = append(data.BotPromptMessageIDs, messageID)
+			logger.Infof("追踪Bot消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.BotPromptMessageIDs))
 		}
 	}
 }
@@ -1832,8 +1909,9 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		return
 	}
 
-	// 发送重新识别的提示消息
-	b.sendMessageWithNilKeyboard(userID, "🔄 正在重新识别图片...")
+	// 发送重新识别的提示消息，并追踪消息ID
+	msgID := b.sendMessageWithNilKeyboard(userID, "🔄 正在重新识别图片...")
+	b.trackBotMessage(userID, transactionID, msgID)
 
 	// 获取 LLM 信号量，控制并发
 	b.llmSemaphore <- struct{}{}
@@ -1973,8 +2051,11 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 	prompt += "取消请输入 /cancel"
 
 	msg := tgbotapi.NewMessage(int64(userID), prompt)
-	if _, err := b.botAPI.Send(msg); err != nil {
+	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
+	} else {
+		// 追踪引导提示消息
+		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 
@@ -1997,8 +2078,9 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 		return
 	}
 
-	// 发送处理中提示
-	b.sendMessageWithNilKeyboard(userID, "🔄 正在根据您的引导重新识别...")
+	// 发送处理中提示，并追踪消息ID
+	msgID := b.sendMessageWithNilKeyboard(userID, "🔄 正在根据您的引导重新识别...")
+	b.trackBotMessage(userID, transactionID, msgID)
 
 	// 获取 LLM 信号量
 	b.llmSemaphore <- struct{}{}

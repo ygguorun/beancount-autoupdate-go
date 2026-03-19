@@ -74,4 +74,6 @@ type PendingTransaction struct {
 	UserOriginalMessageID   int                   // 用户发送图片的原始消息ID
 	OriginalTempFilePath    string                // 原始图片的临时文件路径，用于重新识别
 	ConversationHistory     []ConversationMessage // LLM 对话历史，用于带引导的重试
+	UserInputMessageIDs     []int                 // 用户输入的文本消息ID列表（如修改金额、描述等）
+	BotPromptMessageIDs     []int                 // Bot发送的提示消息ID列表（如"请输入金额"、"正在识别..."等）
 }
