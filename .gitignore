@@ -45,3 +45,5 @@ beancount-data/
 # Temporary files
 tmp/
 temp/
+
+config.toml
