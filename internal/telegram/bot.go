@@ -77,7 +77,7 @@ func (b *Bot) Run() error {
 	workerChan := make(chan tgbotapi.Update, 100)
 
 	// 启动 workers
-	for i := 0; i < workerCount; i++ {
+	for range workerCount {
 		go b.worker(workerChan)
 	}
 
