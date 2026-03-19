@@ -7,6 +7,13 @@ BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
 NEXT_VERSION=$(shell svu next 2>/dev/null || echo "0.0.1")
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)"
 
+# 平台检测 - Windows 需要 .exe 后缀
+ifeq ($(OS),Windows_NT)
+    BINARY=$(APP_NAME).exe
+else
+    BINARY=$(APP_NAME)
+endif
+
 # Go 相关变量
 GOCMD=go
 GOBUILD=$(GOCMD) build
@@ -58,7 +65,7 @@ test-embed:
 build:
 	@echo "构建程序..."
 	@mkdir -p $(BUILD_DIR)
-	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(APP_NAME) $(CMD_DIR)/main.go
+	$(GOBUILD) $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY) $(CMD_DIR)/main.go
 
 # 构建所有平台
 .PHONY: build-all
