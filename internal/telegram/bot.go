@@ -1954,7 +1954,7 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 	b.mu.RLock()
 	if data, ok := b.pendingTx[userID][transactionID]; ok {
 		if len(data.ConversationHistory) > 0 {
-			historyInfo = fmt.Sprintf("已尝试 %d 次", len(data.ConversationHistory))
+			historyInfo = fmt.Sprintf("已尝试 %d 次", int(len(data.ConversationHistory)/2))
 		}
 	}
 	b.mu.RUnlock()
