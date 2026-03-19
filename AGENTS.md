@@ -10,6 +10,7 @@ Beancount AutoUpdate 是一个自动化记账系统，通过 Telegram Bot 接收
 
 - **Telegram Bot 交互**：接收用户发送的账单图片，提供交互式确认和修改界面
 - **AI 智能识别**：使用 LLM 解析账单图片，提取交易日期、金额、商户、账户等关键信息
+- **多轮对话引导**：支持用户通过自然语言引导 LLM 修正识别结果
 - **Beancount 账本管理**：自动生成和管理 Beancount 格式的账本文件
 - **Git 版本控制**：自动提交并推送账本变更到 Git 仓库
 - **WebDAV 图片存储**：将账单图片上传到 WebDAV 服务器
@@ -19,8 +20,8 @@ Beancount AutoUpdate 是一个自动化记账系统，通过 Telegram Bot 接收
 
 - **语言**：Go 1.24.0
 - **Telegram Bot API**：go-telegram-bot-api/v5
+- **LLM API**：openai-go/v3（支持 OpenAI 兼容接口）
 - **Git 操作**：go-git/go-git/v5
-- **WebDAV 客户端**：gowebdav
 - **配置管理**：TOML（使用 BurntSushi/toml）
 - **日志系统**：logrus + lumberjack（日志轮转）
 - **环境变量**：godotenv
@@ -28,7 +29,7 @@ Beancount AutoUpdate 是一个自动化记账系统，通过 Telegram Bot 接收
 ## 项目结构
 
 ```
-go/
+beancount-autoupdate-go/
 ├── cmd/
 │   └── main.go                 # 主程序入口
 ├── internal/
@@ -54,16 +55,17 @@ go/
 │   ├── logger/                 # 日志管理
 │   │   └── logger.go           # 日志初始化和配置
 │   ├── telegram/               # Telegram Bot
-│   │   └── bot.go              # Bot 核心逻辑（1922 行）
+│   │   └── bot.go              # Bot 核心逻辑
 │   └── webdav/                 # WebDAV 客户端
 │       └── manager.go          # WebDAV 文件上传
 ├── build/                      # 构建输出目录
+├── scripts/                    # 部署脚本
 ├── go.mod                      # Go 模块定义
 ├── go.sum                      # 依赖校验和
 ├── Makefile                    # 构建和部署脚本
 ├── config.toml.example         # 配置文件示例
 ├── Dockerfile                  # Docker 镜像定义
-└── scripts/                    # 部署脚本
+└── .goreleaser.yml             # GoReleaser 配置
 ```
 
 ## 构建和运行
@@ -96,6 +98,14 @@ go/
    - 配置 Git 仓库地址
    - 配置 WebDAV 参数（如需上传图片）
 
+### 命令行参数
+
+| 参数 | 说明 |
+|------|------|
+| `-config <path>` | 指定配置文件路径（默认: ./config.toml） |
+| `-version` | 显示版本信息 |
+| `-d` | 启用 debug 模式（日志级别设为 debug） |
+
 ### 常用命令
 
 ```bash
@@ -104,6 +114,9 @@ make deps
 
 # 运行程序
 make run
+
+# 运行程序（debug 模式）
+go run cmd/main.go -d
 
 # 构建程序
 make build
@@ -125,22 +138,6 @@ make docker-build
 
 # 运行 Docker 容器
 make docker-run
-
-# 部署程序
-make deploy
-```
-
-### 运行程序
-
-```bash
-# 使用默认配置文件
-make run
-
-# 指定配置文件
-go run cmd/main.go --config /path/to/config.toml
-
-# 查看版本信息
-go run cmd/main.go --version
 ```
 
 ## 开发约定
@@ -152,19 +149,19 @@ go run cmd/main.go --version
 - **依赖注入**：通过构造函数注入依赖，避免全局变量
 - **错误处理**：使用 `fmt.Errorf` 包装错误，提供上下文信息
 
+### 日志规范
+
+- **统一使用 `internal/logger` 包**：所有模块必须使用 `logger.Infof()` 等函数
+- **禁止直接使用 logrus**：不要在模块中使用 `logrus.StandardLogger()`
+- **日志级别**：Debug < Info < Warn < Error < Fatal
+- **动态调整**：支持通过 `-d` 参数或 `logger.SetLevel()` 动态调整日志级别
+
 ### 并发处理
 
 - **Worker Pool**：Telegram Bot 使用 worker pool 处理消息（默认 5 个 worker）
 - **信号量控制**：LLM 调用使用信号量限制并发（当前限制为 1）
 - **互斥锁**：Beancount 管理器使用 `sync.RWMutex` 保护共享状态
 - **异步操作**：WebDAV 上传和 Git 推送使用 goroutine 异步执行
-
-### 日志规范
-
-- 使用 `internal/logger` 包提供的日志函数
-- 日志级别：Debug、Info、Warn、Error、Fatal
-- 使用结构化日志，提供足够上下文
-- 日志文件自动轮转（默认 10MB，保留 5 个备份）
 
 ### 配置管理
 
@@ -202,11 +199,11 @@ beancount/
 - 显示交易确认界面（内联键盘）
 - 处理用户确认和修改
 - 提交交易到 Beancount
-- 删除用户消息（可选）
+- 删除对话消息（可选）
 
 **重要概念**：
 - `pendingTx`：存储待确认的交易（按 userID 组织）
-- `waitingForInput`：存储等待用户输入的状态
+- `ConversationHistory`：LLM 对话历史，支持多轮对话引导
 - `llmSemaphore`：控制 LLM 并发调用
 - `worker`：消息处理的 worker goroutine
 
@@ -215,9 +212,33 @@ beancount/
 - `worker()`：处理消息的 worker
 - `handlePhoto()`：处理图片消息
 - `handleCallback()`：处理内联键盘回调
-- `showTransactionEdit()`：显示交易编辑界面
 
-### 2. Beancount 管理器 (`internal/beancount/manager.go`)
+### 2. LLM 解析器 (`internal/llm/parser.go`)
+
+**职责**：使用 LLM 识别账单图片，支持多轮对话
+
+**核心功能**：
+- 发送图片到 LLM API（支持 Structured Outputs 和 JSON 模式）
+- 解析 LLM 返回的 JSON
+- 提取交易信息（日期、金额、商户等）
+- 多轮对话历史管理
+
+**对话历史结构**：
+```
+[0] User: [图片 + 提示词]           # 第一次识别
+[1] Assistant: 第一次识别结果
+[2] User: 用户引导文字              # 第一次引导重试
+[3] Assistant: 第二次识别结果
+[4] User: 用户引导文字              # 第二次引导重试
+...
+```
+
+**关键方法**：
+- `ParseImageWithHistory()`：带对话历史的图片解析
+- `ParseWithGuidance()`：带引导文字的重新解析
+- `buildMessages()`：构建 OpenAI API 消息列表
+
+### 3. Beancount 管理器 (`internal/beancount/manager.go`)
 
 **职责**：管理 Beancount 账本文件
 
@@ -233,29 +254,6 @@ beancount/
 - 交易文件路径：`beans/YYYY/MM.bean`
 - 元数据：time、order-id、image-url、discount、original_amount
 
-**关键方法**：
-- `NewManager()`：创建管理器
-- `AddTransactionFromPostings()`：添加交易记录
-- `GetAllCategories()`：获取所有账户分类
-- `GetTransactionFilePath()`：获取交易文件路径
-
-### 3. LLM 解析器 (`internal/llm/parser.go`)
-
-**职责**：使用 LLM 识别账单图片
-
-**核心功能**：
-- 发送图片到 LLM API
-- 解析 LLM 返回的 JSON
-- 提取交易信息（日期、金额、商户等）
-
-**提示词模板**：
-- 模板位置：`internal/embed/templates/receipt_image_recognition.txt`
-- 支持扩展提示词（append 或 replace 模式）
-
-**关键方法**：
-- `NewParser()`：创建解析器
-- `ParseImage()`：解析图片并返回交易信息
-
 ### 4. Git 管理器 (`internal/git/manager.go`)
 
 **职责**：管理 Git 仓库的提交和推送
@@ -267,39 +265,25 @@ beancount/
 - 推送到远程仓库
 - 处理冲突（支持 abort、ours、theirs 策略）
 
-**关键方法**：
-- `NewManager()`：创建管理器
-- `CommitChanges()`：提交变更
-- `PushChanges()`：推送到远程
-- `AutoCommitAndPush()`：自动提交和推送
+### 5. 日志管理器 (`internal/logger/logger.go`)
 
-### 5. WebDAV 管理器 (`internal/webdav/manager.go`)
-
-**职责**：上传账单图片到 WebDAV 服务器
+**职责**：统一管理日志输出
 
 **核心功能**：
-- 连接 WebDAV 服务器
-- 上传文件
-- 测试连接
+- 日志初始化和配置
+- 日志轮转（使用 lumberjack）
+- 同时输出到文件和标准输出
+- 动态调整日志级别
 
-**文件名模板**：
-- 支持变量：`{date}`、`{order_id}`、`{datetime}`、`{uuid}`
-- 示例：`{datetime}_{order_id}_{uuid}.jpg`
-
-**关键方法**：
-- `NewManager()`：创建管理器
-- `UploadFile()`：上传文件
-- `TestConnection()`：测试连接
+**提供的函数**：
+- `Init()`：初始化日志系统
+- `SetLevel()`：设置日志级别
+- `Info()`, `Debug()`, `Warn()`, `Error()`, `Fatal()`：日志输出
+- `Infof()`, `Debugf()`, `Warnf()`, `Errorf()`, `Fatalf()`：格式化日志
 
 ### 6. 配置管理 (`internal/config/config.go`)
 
 **职责**：加载和管理配置
-
-**核心功能**：
-- 从 TOML 文件加载配置
-- 从环境变量覆盖配置
-- 验证配置有效性
-- 提供绝对路径转换
 
 **配置项**：
 - `Telegram`：Bot Token、允许的用户 ID、消息删除策略
@@ -309,22 +293,33 @@ beancount/
 - `Logging`：日志级别、目录、文件大小、备份数量
 - `WebDAV`：启用状态、URL、凭据、路径、文件名模板
 
-### 7. 嵌入模板 (`internal/embed/embed.go`)
+## 数据类型
 
-**职责**：管理嵌入的模板文件
+### ConversationMessage
 
-**核心功能**：
-- 嵌入 Beancount 模板文件
-- 提供模板访问接口
+用于 LLM 多轮对话历史：
 
-**模板文件**：
-- `assets.bean`：资产账户定义
-- `expenses.bean`：支出账户定义
-- `income.bean`：收入账户定义
-- `liabilities.bean`：负债账户定义
-- `equity.bean`：权益账户定义
-- `init.bean`：资产初始化
-- `receipt_image_recognition.txt`：LLM 提示词
+```go
+type ConversationMessage struct {
+    Role        string `json:"role"`         // "user" 或 "assistant"
+    Content     string `json:"content"`      // 消息内容（文本）
+    ImageBase64 string `json:"image_base64"` // 图片的 base64 编码（仅首次用户消息有）
+}
+```
+
+### PendingTransaction
+
+待确认的交易数据：
+
+```go
+type PendingTransaction struct {
+    TransactionID           string
+    ConversationHistory     []ConversationMessage // LLM 对话历史
+    UserInputMessageIDs     []int                 // 用户输入消息ID列表
+    BotPromptMessageIDs     []int                 // Bot提示消息ID列表
+    // ... 其他字段
+}
+```
 
 ## 数据流
 
@@ -332,24 +327,25 @@ beancount/
 
 1. **用户发送图片**：Telegram Bot 接收图片
 2. **LLM 解析**：调用 LLM API 提取交易信息
-3. **显示确认界面**：显示内联键盘供用户确认或修改
-4. **用户确认**：用户点击确认按钮
+3. **显示确认界面**：显示内联键盘供用户确认或引导重试
+4. **用户确认/引导重试**：
+   - 确认：继续提交流程
+   - 引导重试：用户输入自然语言引导 LLM 修正结果
 5. **上传图片**（可选）：异步上传到 WebDAV
 6. **写入账本**：将交易记录写入 Beancount 文件
 7. **Git 提交**（可选）：自动提交变更
 8. **Git 推送**（可选）：自动推送到远程仓库
 9. **发送成功消息**：通知用户交易已记录
+10. **删除对话消息**：清理确认/取消后的所有对话消息
 
-### 并发处理
+### LLM 多轮对话流程
 
-- **图片上传**：使用独立 goroutine，不阻塞主流程
-- **LLM 解析**：使用信号量限制并发数
-- **Git 操作**：使用 goroutine 异步执行
-- **消息处理**：使用 worker pool（5 个 worker）
+1. **第一次识别**：发送 `[图片 + 提示词]`，返回识别结果
+2. **用户引导重试**：用户输入"金额应该是 50 元"
+3. **第二次识别**：发送历史 + 用户引导，返回修正结果
+4. **循环**：可多次引导重试，直到用户满意
 
 ## 测试
-
-### 运行测试
 
 ```bash
 # 运行所有测试
@@ -359,34 +355,19 @@ make test
 make test-coverage
 ```
 
-### 测试覆盖
-
-- 单元测试：每个模块的独立测试
-- 集成测试：模块间交互测试
-- TODO：添加更多测试用例
-
 ## 部署
 
 ### 本地部署
 
 ```bash
-# 构建
 make build
-
-# 安装
-make install
-
-# 运行
-beancount-autoupdate
+./build/beancount-autoupdate
 ```
 
 ### Docker 部署
 
 ```bash
-# 构建镜像
 make docker-build
-
-# 运行容器
 make docker-run
 ```
 
@@ -407,38 +388,26 @@ A：在 `config.toml` 中设置 `telegram.allowed_user_ids`，或使用环境变
 **Q：如何自定义 LLM 提示词？**
 A：在 `config.toml` 中配置 `llm.extend_prompt`，支持 append 和 replace 模式。
 
-**Q：如何禁用 WebDAV 上传？**
-A：在 `config.toml` 中设置 `webdav.enabled = false`。
-
-### 运行相关
-
-**Q：如何查看日志？**
-A：日志文件默认在 `logs/beancount-autoupdate.log`。
-
-**Q：如何处理 Git 冲突？**
-A：配置 `git.conflict_strategy`，支持 abort、ours、theirs 策略。
-
-**Q：如何调整 LLM 超时时间？**
-A：在 `config.toml` 中配置 `llm.timeout`（秒）。
+**Q：如何启用 debug 日志？**
+A：使用 `-d` 参数运行程序，或在 `config.toml` 中设置 `logging.level = "debug"`。
 
 ### 开发相关
+
+**Q：如何统一日志输出？**
+A：所有模块必须使用 `internal/logger` 包，禁止直接使用 `logrus`。
 
 **Q：如何添加新的账户类型？**
 A：在 `internal/beancount/types.go` 中添加类型，并在模板中添加对应文件。
 
-**Q：如何修改交易文件的组织方式？**
-A：修改 `internal/beancount/manager.go` 中的 `GetTransactionFilePath()` 方法。
-
-**Q：如何增加 LLM 并发数？**
+**Q：如何修改 LLM 并发数？**
 A：修改 `internal/telegram/bot.go` 中的 `llmSemaphore` 大小。
 
 ## 贡献指南
 
 1. 遵循现有的代码风格和约定
-2. 添加必要的注释和文档
-3. 编写测试用例
-4. 更新相关文档
-5. 提交前运行 `make fmt` 和 `make lint`
+2. 使用 `internal/logger` 包统一日志输出
+3. 添加必要的注释和文档
+4. 提交前运行 `make fmt` 和 `make lint`
 
 ## 许可证
 
@@ -451,4 +420,4 @@ MIT License
 
 ---
 
-**最后更新**：2026-03-18
+**最后更新**：2026-03-19
