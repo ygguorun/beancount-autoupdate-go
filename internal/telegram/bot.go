@@ -425,7 +425,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 			len(accounts[beancount.AccountTypeIncome]))
 
 		var history []beancount.ConversationMessage
-		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, []string{}, nil)
+		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, []string{}, nil, "")
 		if parseErr != nil {
 			logger.Errorf("LLM 解析失败: %v", parseErr)
 		} else if parseResult == nil {
@@ -1497,7 +1497,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	accounts := b.beancountMgr.GetAllCategories()
 	allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
 
-	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, []string{}, nil)
+	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, []string{}, nil, "")
 	if err != nil {
 		logger.Errorf("LLM 重新解析失败: %v", err)
 		// 发送带有重新识别选项的错误消息

@@ -46,12 +46,13 @@ func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string) 
 
 // ParseImage 解析图片中的交易信息
 func (p *Parser) ParseImage(imagePath string, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
-	result, _, err := p.ParseImageWithHistory(imagePath, accountNames, tagNames, nil)
+	result, _, err := p.ParseImageWithHistory(imagePath, accountNames, tagNames, nil, "")
 	return result, err
 }
 
 // ParseImageWithHistory 带对话历史的图片解析（支持重试）
-func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+// userPromptOverride 用于引导重试时传入用户引导文字，为空时使用默认提示词
+func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage, userPromptOverride string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	// 编码图片
 	base64Image, err := p.encodeImage(imagePath)
 	if err != nil {
@@ -62,14 +63,42 @@ func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames 
 	prompt := p.buildPrompt(accountNames, tagNames)
 
 	// 构建消息列表
-	messages := p.buildMessages(prompt, base64Image, history)
+	// userPromptOverride 作为 currentPrompt 传入，用于引导重试时添加当前用户消息
+	messages := p.buildMessages(prompt, base64Image, history, userPromptOverride)
+
+	// 记录 LLM 输入日志
+	logger.Debugf("LLM Input: history_count=%d, has_image=%v, current_prompt_len=%d", len(history), base64Image != "", len(userPromptOverride))
+	for i, msg := range history {
+		hasImage := msg.ImageBase64 != ""
+		contentPreview := msg.Content
+		if len(contentPreview) > 100 {
+			contentPreview = contentPreview[:100] + "..."
+		}
+		logger.Debugf("  History[%d] %s: %s (image=%v)", i, msg.Role, contentPreview, hasImage)
+	}
+	if userPromptOverride != "" {
+		logger.Debugf("  Current user: %s", userPromptOverride)
+	}
+
+	// 确定需要保存的用户消息内容
+	// 第一次识别（历史为空）：保存提示词 + 图片
+	// 引导重试（历史不为空）：保存用户引导文字（userPromptOverride）
+	var userPromptForHistory string
+	var imageBase64ForHistory string
+	if len(history) == 0 {
+		userPromptForHistory = prompt
+		imageBase64ForHistory = base64Image
+	} else {
+		userPromptForHistory = userPromptOverride
+		// 引导重试时不保存图片
+	}
 
 	// 尝试使用 Structured Outputs
-	transactionData, newHistory, err := p.callWithStructuredOutput(messages, history)
+	transactionData, newHistory, err := p.callWithStructuredOutput(messages, history, userPromptForHistory, imageBase64ForHistory)
 	if err != nil {
 		logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
 		// 降级：尝试普通 JSON 模式
-		transactionData, newHistory, err = p.callWithJSONMode(messages, history)
+		transactionData, newHistory, err = p.callWithJSONMode(messages, history, userPromptForHistory, imageBase64ForHistory)
 		if err != nil {
 			return nil, history, fmt.Errorf("failed to parse response: %w", err)
 		}
@@ -80,13 +109,8 @@ func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames 
 
 // ParseWithGuidance 带引导文字的重新解析
 func (p *Parser) ParseWithGuidance(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage, userGuidance string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
-	// 添加用户引导到历史
-	history = append(history, beancount.ConversationMessage{
-		Role:    "user",
-		Content: userGuidance,
-	})
-
-	return p.ParseImageWithHistory(imagePath, accountNames, tagNames, history)
+	// 不再直接修改历史，让 ParseImageWithHistory 通过 updateHistory 保存用户引导
+	return p.ParseImageWithHistory(imagePath, accountNames, tagNames, history, userGuidance)
 }
 
 // ParseImageFromBytes 从字节数组解析图片
@@ -177,38 +201,58 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 }
 
 // buildMessages 构建 OpenAI API 消息列表
-func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.ConversationMessage) []openai.ChatCompletionMessageParamUnion {
+// currentPrompt 用于引导重试时添加当前用户消息
+func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) []openai.ChatCompletionMessageParamUnion {
 	var messages []openai.ChatCompletionMessageParamUnion
 
-	// 添加历史消息
+	// 如果历史为空，使用 prompt 和 base64Image 构建新消息（第一次识别）
+	if len(history) == 0 {
+		if base64Image != "" {
+			// 包含图片的消息
+			content := []openai.ChatCompletionContentPartUnionParam{
+				openai.TextContentPart(prompt),
+				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+					URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
+				}),
+			}
+			messages = append(messages, openai.UserMessage(content))
+		} else {
+			messages = append(messages, openai.UserMessage(prompt))
+		}
+		return messages
+	}
+
+	// 历史不为空，从历史构建消息（引导重试）
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
-			messages = append(messages, openai.UserMessage(msg.Content))
+			// 如果历史消息包含图片，构建包含图片的用户消息
+			if msg.ImageBase64 != "" {
+				content := []openai.ChatCompletionContentPartUnionParam{
+					openai.TextContentPart(msg.Content),
+					openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
+						URL: fmt.Sprintf("data:image/jpeg;base64,%s", msg.ImageBase64),
+					}),
+				}
+				messages = append(messages, openai.UserMessage(content))
+			} else {
+				messages = append(messages, openai.UserMessage(msg.Content))
+			}
 		case "assistant":
 			messages = append(messages, openai.AssistantMessage(msg.Content))
 		}
 	}
 
-	// 构建当前用户消息（包含图片）
-	if base64Image != "" {
-		// 使用 TextContentPart 和 ImageContentPart
-		content := []openai.ChatCompletionContentPartUnionParam{
-			openai.TextContentPart(prompt),
-			openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-				URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
-			}),
-		}
-		messages = append(messages, openai.UserMessage(content))
-	} else {
-		messages = append(messages, openai.UserMessage(prompt))
+	// 添加当前用户消息（引导重试时的用户引导）
+	if currentPrompt != "" {
+		messages = append(messages, openai.UserMessage(currentPrompt))
 	}
 
 	return messages
 }
 
 // callWithStructuredOutput 使用 Structured Outputs 调用
-func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage, prompt, imageBase64 string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
@@ -254,14 +298,14 @@ func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessag
 		return nil, history, fmt.Errorf("no transaction data found")
 	}
 
-	// 更新历史
-	newHistory := p.updateHistory(history, content)
+	// 更新历史（保存用户提示词、图片和助手响应）
+	newHistory := p.updateHistory(history, prompt, imageBase64, content)
 
 	return &transactionData, newHistory, nil
 }
 
 // callWithJSONMode 降级方案：使用普通 JSON 模式
-func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage, prompt, imageBase64 string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
@@ -291,7 +335,7 @@ func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUn
 		return nil, history, err
 	}
 
-	newHistory := p.updateHistory(history, content)
+	newHistory := p.updateHistory(history, prompt, imageBase64, content)
 	return transactionData, newHistory, nil
 }
 
@@ -306,8 +350,16 @@ func isStructuredOutputUnsupported(err error) bool {
 }
 
 // updateHistory 更新对话历史
-func (p *Parser) updateHistory(history []beancount.ConversationMessage, assistantResponse string) []beancount.ConversationMessage {
-	// 添加助手响应到历史
+func (p *Parser) updateHistory(history []beancount.ConversationMessage, userPrompt, imageBase64, assistantResponse string) []beancount.ConversationMessage {
+	// 先添加用户消息（保存文本提示词和图片）
+	if userPrompt != "" {
+		history = append(history, beancount.ConversationMessage{
+			Role:        "user",
+			Content:     userPrompt,
+			ImageBase64: imageBase64,
+		})
+	}
+	// 再添加助手响应
 	history = append(history, beancount.ConversationMessage{
 		Role:    "assistant",
 		Content: assistantResponse,
