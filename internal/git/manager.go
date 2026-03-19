@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"beancount-autoupdate/internal/logger"
+
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/config"
 	"github.com/go-git/go-git/v5/plumbing"
@@ -16,11 +18,8 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/plumbing/transport/ssh"
 
-	"github.com/sirupsen/logrus"
 	gossh "golang.org/x/crypto/ssh"
 )
-
-var logger = logrus.StandardLogger()
 
 // Manager Git 管理器
 type Manager struct {
