@@ -1380,18 +1380,6 @@ func (b *Bot) sendReply(message *tgbotapi.Message, text string) {
 	}
 }
 
-// sendMessage 发送消息
-func (b *Bot) sendMessage(userID int, text string, keyboard tgbotapi.InlineKeyboardMarkup) {
-	msg := tgbotapi.NewMessage(int64(userID), text)
-	if keyboard.InlineKeyboard != nil {
-		msg.ReplyMarkup = &keyboard
-	}
-	msg.ParseMode = ""
-	if _, err := b.botAPI.Send(msg); err != nil {
-		logger.Errorf("发送消息失败: %v", err)
-	}
-}
-
 // sendMessageWithNilKeyboard 发送不带键盘的消息，返回消息ID
 func (b *Bot) sendMessageWithNilKeyboard(userID int, text string) int {
 	msg := tgbotapi.NewMessage(int64(userID), text)
