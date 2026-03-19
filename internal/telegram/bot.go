@@ -1003,6 +1003,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 						logger.Infof("删除当前交易 %s 的之前消息: %v", transactionID, d.PreviousMessageIDs)
 						b.deleteMessages(userID, d.PreviousMessageIDs)
 						d.PreviousMessageIDs = []int{}
+						d.OriginalMessageID = 0 // 原始消息已被删除
 					}
 					// 添加当前消息ID到PreviousMessageIDs
 					d.PreviousMessageIDs = append(d.PreviousMessageIDs, sentMsg.MessageID)
@@ -1033,6 +1034,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 					logger.Infof("删除当前交易 %s 的之前消息: %v", transactionID, d.PreviousMessageIDs)
 					b.deleteMessages(userID, d.PreviousMessageIDs)
 					d.PreviousMessageIDs = []int{}
+					d.OriginalMessageID = 0 // 原始消息已被删除
 				}
 				// 添加当前消息ID到PreviousMessageIDs
 				d.PreviousMessageIDs = append(d.PreviousMessageIDs, sentMsg.MessageID)
