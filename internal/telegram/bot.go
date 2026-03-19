@@ -1297,8 +1297,8 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 		return
 	}
 
-	logger.Infof("取消交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d",
-		transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID)
+	logger.Infof("取消交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserInputMessageIDs=%v, BotPromptMessageIDs=%v",
+		transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserInputMessageIDs, data.BotPromptMessageIDs)
 
 	// 删除 WebDAV 临时文件
 	if data.TempWebDAVPath != "" && b.webdavMgr != nil {
@@ -1323,6 +1323,18 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 		b.deleteMessages(userID, data.PreviousMessageIDs)
 	}
 
+	// 删除用户输入的文本消息
+	if len(data.UserInputMessageIDs) > 0 {
+		logger.Infof("删除当前交易 %s 的用户输入消息: %v", transactionID, data.UserInputMessageIDs)
+		b.deleteMessages(userID, data.UserInputMessageIDs)
+	}
+
+	// 删除 Bot 发送的提示消息
+	if len(data.BotPromptMessageIDs) > 0 {
+		logger.Infof("删除当前交易 %s 的 Bot 提示消息: %v", transactionID, data.BotPromptMessageIDs)
+		b.deleteMessages(userID, data.BotPromptMessageIDs)
+	}
+
 	// 也删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
 	if data.OriginalMessageID > 0 {
 		// 检查是否已经在 PreviousMessageIDs 中被删除
@@ -1344,14 +1356,7 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 		}
 	}
 
-	// 根据配置删除用户发送的原始图片消息
-	if b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
-		logger.Infof("删除当前交易 %s 的用户原始图片消息: %d", transactionID, data.UserOriginalMessageID)
-		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
-		if _, err := b.botAPI.Request(deleteMsg); err != nil {
-			logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.UserOriginalMessageID, err)
-		}
-	}
+	// 保留用户原始图片消息（取消交易时保留用户图片，方便重新识别）
 
 	// 从 pendingTx 中删除当前交易
 	delete(b.pendingTx[userID], transactionID)
