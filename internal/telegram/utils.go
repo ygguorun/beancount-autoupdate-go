@@ -133,9 +133,10 @@ func (b *Bot) cleanupTransactionMessages(userID int, transactionID string, data 
 		}
 	}
 
-	// 根据参数删除用户发送的原始图片消息
+	// 根据参数删除原始图片消息
+	// 确认时根据 DeleteUserMessage 配置决定是否删除，取消时不删除
 	if deleteUserImage && b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
-		logger.Infof("删除当前交易 %s 的用户原始图片消息: %d", transactionID, data.UserOriginalMessageID)
+		logger.Infof("删除当前交易 %s 的原始图片消息: %d", transactionID, data.UserOriginalMessageID)
 		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
 		if _, err := b.botAPI.Request(deleteMsg); err != nil {
 			logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.UserOriginalMessageID, err)

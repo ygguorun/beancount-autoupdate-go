@@ -18,7 +18,8 @@ import (
 )
 
 // processImage 处理图片识别的公共逻辑
-func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string) {
+// isBotPhoto: 是否为 Bot 发送的图片（Bot 发送的图片不应被删除）
+func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string, isBotPhoto bool) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
 	// 先生成唯一的交易ID，包含随机数以避免冲突
@@ -170,6 +171,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		TempWebDAVPath:        actualTempWebDAVPath,
 		SpecialDirectives:     parseResult.SpecialDirectives,
 		UserOriginalMessageID: message.MessageID,
+		IsBotPhoto:            isBotPhoto,
 		ConversationHistory:   parseHistory,
 		BotPromptMessageIDs:   []int{},
 	}
@@ -326,7 +328,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
 
 	// 调用公共处理函数
-	b.processImage(message, userID, tempFile, ext, "文件")
+	b.processImage(message, userID, tempFile, ext, "文件", false)
 }
 
 // handlePhoto 处理照片
@@ -399,7 +401,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s", userID, tempFile)
 
 	// 调用公共处理函数
-	b.processImage(message, userID, tempFile, ".jpg", "")
+	b.processImage(message, userID, tempFile, ".jpg", "", false)
 }
 
 // confirmTransaction 确认交易
@@ -1019,8 +1021,8 @@ func (b *Bot) downloadAndProcessBotPhoto(message *tgbotapi.Message, userID int, 
 
 	logger.Infof("成功下载 Bot 发送的图片，临时文件: %s", tempFile)
 
-	// 调用公共处理函数（使用被回复的消息作为原始消息引用）
-	b.processImage(replyToMsg, userID, tempFile, ".jpg", "（Bot发送）")
+	// 调用公共处理函数（使用被回复的消息作为原始消息引用，isBotPhoto=true 表示不删除 Bot 发送的图片）
+	b.processImage(replyToMsg, userID, tempFile, ".jpg", "（Bot发送）", true)
 }
 
 // downloadAndProcessBotDocument 下载并处理 Bot 发送的图片文件
@@ -1104,6 +1106,6 @@ func (b *Bot) downloadAndProcessBotDocument(message *tgbotapi.Message, userID in
 
 	logger.Infof("成功下载 Bot 发送的图片文件，临时文件: %s, 原始文件名: %s", tempFile, document.FileName)
 
-	// 调用公共处理函数（使用被回复的消息作为原始消息引用）
-	b.processImage(replyToMsg, userID, tempFile, ext, "文件（Bot发送）")
+	// 调用公共处理函数（使用被回复的消息作为原始消息引用，isBotPhoto=true 表示不删除 Bot 发送的图片）
+	b.processImage(replyToMsg, userID, tempFile, ext, "文件（Bot发送）", true)
 }
