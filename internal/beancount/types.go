@@ -73,6 +73,7 @@ type PendingTransaction struct {
 	PreviousMessageIDs      []int                 // 之前需要删除的消息ID列表
 	SpecialDirectives       []string              // 特殊指令，如 pad、balance 等
 	UserOriginalMessageID   int                   // 用户发送图片的原始消息ID
+	IsBotPhoto              bool                  // 是否为 Bot 发送的图片（确认时删除，取消时保留）
 	OriginalTempFilePath    string                // 原始图片的临时文件路径，用于重新识别
 	ConversationHistory     []ConversationMessage // LLM 对话历史，用于带引导的重试
 	UserInputMessageIDs     []int                 // 用户输入的文本消息ID列表（如修改金额、描述等）
