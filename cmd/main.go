@@ -133,6 +133,7 @@ func main() {
 		cfg.LLM.APIKey,
 		cfg.LLM.Timeout,
 		cfg.LLM.ExtendPrompt,
+		cfg.LLM.MaxImageSize,
 	)
 
 	// 初始化 WebDAV 管理器（如果启用）

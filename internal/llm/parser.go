@@ -1,14 +1,20 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/disintegration/imaging"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 
@@ -23,10 +29,11 @@ type Parser struct {
 	model        string
 	timeout      time.Duration
 	extendPrompt string
+	maxImageSize int
 }
 
 // NewParser 创建 LLM 解析器
-func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string) *Parser {
+func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string, maxImageSize int) *Parser {
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
@@ -39,6 +46,7 @@ func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string) 
 		model:        model,
 		timeout:      time.Duration(timeout) * time.Second,
 		extendPrompt: extendPrompt,
+		maxImageSize: maxImageSize,
 	}
 }
 
@@ -123,13 +131,65 @@ func (p *Parser) ParseImageFromBytes(imageData []byte, expenseCategories, income
 	return p.ParseImage(tempFile, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames)
 }
 
-// encodeImage 将图片编码为 base64
+// encodeImage 将图片编码为 base64，如果超过尺寸限制则进行压缩
 func (p *Parser) encodeImage(imagePath string) (string, error) {
+	// 读取原始图片数据
 	data, err := os.ReadFile(imagePath)
 	if err != nil {
 		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(data), nil
+
+	// 如果没有尺寸限制，直接返回原始数据
+	if p.maxImageSize <= 0 {
+		return base64.StdEncoding.EncodeToString(data), nil
+	}
+
+	// 解码图片获取尺寸
+	img, format, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		// 如果解码失败，可能是格式不支持，直接返回原始数据
+		logger.Warnf("无法解码图片 %s: %v，将使用原始图片", imagePath, err)
+		return base64.StdEncoding.EncodeToString(data), nil
+	}
+
+	bounds := img.Bounds()
+	width := bounds.Dx()
+	height := bounds.Dy()
+
+	// 检查是否需要压缩
+	if width <= p.maxImageSize && height <= p.maxImageSize {
+		logger.Debugf("图片尺寸 %dx%d 在限制范围内，无需压缩", width, height)
+		return base64.StdEncoding.EncodeToString(data), nil
+	}
+
+	// 计算缩放后的尺寸（保持宽高比）
+	var newWidth, newHeight int
+	if width > height {
+		newWidth = p.maxImageSize
+		newHeight = height * p.maxImageSize / width
+	} else {
+		newHeight = p.maxImageSize
+		newWidth = width * p.maxImageSize / height
+	}
+
+	logger.Infof("图片尺寸 %dx%d 超过限制 %d，压缩为 %dx%d", width, height, p.maxImageSize, newWidth, newHeight)
+
+	// 使用 imaging 库进行缩放
+	resized := imaging.Resize(img, newWidth, newHeight, imaging.Lanczos)
+
+	// 编码为 JPEG 格式
+	var buf bytes.Buffer
+	if format == "png" {
+		if err := imaging.Encode(&buf, resized, imaging.PNG); err != nil {
+			return "", fmt.Errorf("failed to encode resized image as PNG: %w", err)
+		}
+	} else {
+		if err := imaging.Encode(&buf, resized, imaging.JPEG, imaging.JPEGQuality(90)); err != nil {
+			return "", fmt.Errorf("failed to encode resized image as JPEG: %w", err)
+		}
+	}
+
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
 }
 
 // buildPrompt 构建 LLM 提示词
