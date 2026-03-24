@@ -6,6 +6,7 @@ toolchain go1.24.2
 
 require (
 	github.com/BurntSushi/toml v1.4.0
+	github.com/disintegration/imaging v1.6.2
 	github.com/go-git/go-git/v5 v5.13.2
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/google/uuid v1.6.0
@@ -36,6 +37,7 @@ require (
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/xanzy/ssh-agent v0.3.3 // indirect
+	golang.org/x/image v0.0.0-20191009234506-e7c1f5e7dbb8 // indirect
 	golang.org/x/net v0.48.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
