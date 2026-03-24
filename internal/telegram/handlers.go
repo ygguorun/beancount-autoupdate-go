@@ -115,14 +115,14 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	if parseErr != nil {
 		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
 		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID)
-		b.sendRecognitionErrorKeyboard(userID, message.MessageID)
+		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
 		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID)
-		b.sendRecognitionErrorKeyboard(userID, message.MessageID)
+		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
 		return
 	}
 
@@ -208,14 +208,14 @@ func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFil
 }
 
 // sendRecognitionErrorKeyboard 发送识别错误的键盘
-func (b *Bot) sendRecognitionErrorKeyboard(userID int, replyToMessageID int) {
+func (b *Bot) sendRecognitionErrorKeyboard(userID int, transactionID string, replyToMessageID int) {
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", "error:guided_retry"),
-			tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", "error:rerun_recognition"),
+			tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
+			tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("❌ 取消", "error:cancel"),
+			tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
 		),
 	)
 	msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
