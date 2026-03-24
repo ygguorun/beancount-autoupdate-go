@@ -905,3 +905,205 @@ func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance str
 	}
 }
 
+// isBotPhotoMessage 检查消息是否为 Bot 发送的图片消息
+func (b *Bot) isBotPhotoMessage(msg *tgbotapi.Message) bool {
+	if msg == nil || msg.From == nil {
+		return false
+	}
+
+	// 检查是否来自 Bot
+	if !msg.From.IsBot {
+		return false
+	}
+
+	// 检查是否包含图片（聊天图片）
+	if len(msg.Photo) > 0 {
+		return true
+	}
+
+	// 检查是否为图片类型的 Document
+	if msg.Document != nil && strings.HasPrefix(msg.Document.MimeType, "image/") {
+		return true
+	}
+
+	return false
+}
+
+// handleReplyToBotPhoto 处理用户回复 Bot 发送的图片
+func (b *Bot) handleReplyToBotPhoto(message *tgbotapi.Message) {
+	userID := int(message.From.ID)
+
+	// 检查用户权限
+	if !b.config.IsUserAllowed(userID) {
+		b.sendReply(message, "❌ 您没有权限使用此机器人")
+		return
+	}
+
+	// 获取被回复的消息
+	replyToMsg := message.ReplyToMessage
+	if replyToMsg == nil {
+		b.sendReply(message, "❌ 未找到被回复的消息")
+		return
+	}
+
+	logger.Infof("用户 %d 回复了 Bot 发送的图片，消息ID: %d", userID, replyToMsg.MessageID)
+
+	// 处理聊天图片
+	if len(replyToMsg.Photo) > 0 {
+		b.downloadAndProcessBotPhoto(message, userID, replyToMsg)
+		return
+	}
+
+	// 处理图片文件
+	if replyToMsg.Document != nil && strings.HasPrefix(replyToMsg.Document.MimeType, "image/") {
+		b.downloadAndProcessBotDocument(message, userID, replyToMsg)
+		return
+	}
+
+	b.sendReply(message, "❌ 被回复的消息不包含图片")
+}
+
+// downloadAndProcessBotPhoto 下载并处理 Bot 发送的聊天图片
+func (b *Bot) downloadAndProcessBotPhoto(message *tgbotapi.Message, userID int, replyToMsg *tgbotapi.Message) {
+	photos := replyToMsg.Photo
+	photo := photos[len(photos)-1] // 获取最大尺寸的图片
+
+	fileConfig := tgbotapi.FileConfig{
+		FileID: photo.FileID,
+	}
+
+	file, err := b.botAPI.GetFile(fileConfig)
+	if err != nil {
+		logger.Errorf("Failed to get bot photo file: %v", err)
+		b.sendReply(message, "❌ 下载图片失败")
+		return
+	}
+
+	// 创建临时文件
+	tempDir := os.TempDir()
+	tempFile := filepath.Join(tempDir, fmt.Sprintf("temp_bot_%d_%d.jpg", time.Now().Unix(), userID))
+
+	// 下载图片
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.botAPI.Token, file.FilePath)
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		logger.Errorf("Failed to download bot photo: %v", err)
+		b.sendReply(message, "❌ 下载图片失败")
+		return
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Errorf("Failed to download bot photo, status: %d", resp.StatusCode)
+		b.sendReply(message, "❌ 下载图片失败")
+		return
+	}
+
+	// 保存到临时文件
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Errorf("Failed to read bot photo: %v", err)
+		b.sendReply(message, "❌ 下载图片失败")
+		return
+	}
+
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		logger.Errorf("Failed to write bot photo: %v", err)
+		b.sendReply(message, "❌ 下载图片失败")
+		return
+	}
+
+	logger.Infof("成功下载 Bot 发送的图片，临时文件: %s", tempFile)
+
+	// 调用公共处理函数（使用被回复的消息作为原始消息引用）
+	b.processImage(replyToMsg, userID, tempFile, ".jpg", "（Bot发送）")
+}
+
+// downloadAndProcessBotDocument 下载并处理 Bot 发送的图片文件
+func (b *Bot) downloadAndProcessBotDocument(message *tgbotapi.Message, userID int, replyToMsg *tgbotapi.Message) {
+	document := replyToMsg.Document
+
+	// 检查文件大小（限制 20MB）
+	if document.FileSize > 20*1024*1024 {
+		b.sendReply(message, "❌ 文件过大，请上传小于 20MB 的图片")
+		return
+	}
+
+	// 获取文件
+	fileConfig := tgbotapi.FileConfig{
+		FileID: document.FileID,
+	}
+
+	file, err := b.botAPI.GetFile(fileConfig)
+	if err != nil {
+		logger.Errorf("Failed to get bot document file: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	// 确定文件扩展名
+	ext := filepath.Ext(document.FileName)
+	if ext == "" {
+		// 从 MIME 类型推断扩展名
+		switch document.MimeType {
+		case "image/jpeg", "image/jpg":
+			ext = ".jpg"
+		case "image/png":
+			ext = ".png"
+		case "image/gif":
+			ext = ".gif"
+		case "image/webp":
+			ext = ".webp"
+		default:
+			logger.Warnf("Unknown MIME type: %s", document.MimeType)
+			ext = ".jpg"
+		}
+	}
+
+	// 创建临时文件
+	tempDir := os.TempDir()
+	tempFile := filepath.Join(tempDir, fmt.Sprintf("temp_bot_doc_%d_%d%s", time.Now().Unix(), userID, ext))
+
+	// 下载文件
+	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.botAPI.Token, file.FilePath)
+	resp, err := http.Get(fileURL)
+	if err != nil {
+		logger.Errorf("Failed to download bot document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			logger.Errorf("关闭响应体失败: %v", closeErr)
+		}
+	}()
+
+	if resp.StatusCode != http.StatusOK {
+		logger.Errorf("Failed to download bot document, status: %d", resp.StatusCode)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	// 保存到临时文件
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logger.Errorf("Failed to read bot document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+		logger.Errorf("Failed to write bot document: %v", err)
+		b.sendReply(message, "❌ 下载文件失败")
+		return
+	}
+
+	logger.Infof("成功下载 Bot 发送的图片文件，临时文件: %s, 原始文件名: %s", tempFile, document.FileName)
+
+	// 调用公共处理函数（使用被回复的消息作为原始消息引用）
+	b.processImage(replyToMsg, userID, tempFile, ext, "文件（Bot发送）")
+}

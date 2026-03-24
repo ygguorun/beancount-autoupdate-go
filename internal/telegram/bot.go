@@ -109,6 +109,12 @@ func (b *Bot) handleMessage(update tgbotapi.Update) {
 		return
 	}
 
+	// 处理回复 Bot 发送的图片
+	if message.ReplyToMessage != nil && b.isBotPhotoMessage(message.ReplyToMessage) {
+		b.handleReplyToBotPhoto(message)
+		return
+	}
+
 	// 处理命令
 	if message.IsCommand() {
 		b.handleCommand(message)

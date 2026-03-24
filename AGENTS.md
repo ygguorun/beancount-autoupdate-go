@@ -9,6 +9,7 @@ Beancount AutoUpdate 是一个自动化记账系统，通过 Telegram Bot 接收
 ### 核心功能
 
 - **Telegram Bot 交互**：接收用户发送的账单图片，提供交互式确认和修改界面
+- **Bot 图片识别**：支持用户回复 Bot 发送的图片进行识别（自动化截图场景）
 - **AI 智能识别**：使用 LLM 解析账单图片，提取交易日期、金额、商户、账户等关键信息
 - **多轮对话引导**：支持用户通过自然语言引导 LLM 修正识别结果
 - **Beancount 账本管理**：自动生成和管理 Beancount 格式的账本文件
@@ -19,10 +20,10 @@ Beancount AutoUpdate 是一个自动化记账系统，通过 Telegram Bot 接收
 ### 技术栈
 
 - **语言**：Go 1.24.0
-- **Telegram Bot API**：go-telegram-bot-api/v5
-- **LLM API**：openai-go/v3（支持 OpenAI 兼容接口）
-- **Git 操作**：go-git/go-git/v5
-- **配置管理**：TOML（使用 BurntSushi/toml）
+- **Telegram Bot API**：go-telegram-bot-api/v5 (v5.5.1)
+- **LLM API**：openai-go/v3 (v3.29.0，支持 OpenAI 兼容接口)
+- **Git 操作**：go-git/go-git/v5 (v5.13.2)
+- **配置管理**：TOML（BurntSushi/toml v1.4.0）
 - **日志系统**：logrus + lumberjack（日志轮转）
 - **环境变量**：godotenv
 
@@ -55,7 +56,9 @@ beancount-autoupdate-go/
 │   ├── logger/                 # 日志管理
 │   │   └── logger.go           # 日志初始化和配置
 │   ├── telegram/               # Telegram Bot
-│   │   └── bot.go              # Bot 核心逻辑
+│   │   ├── bot.go              # Bot 核心逻辑
+│   │   ├── handlers.go         # 消息处理器函数
+│   │   └── utils.go            # 工具函数
 │   └── webdav/                 # WebDAV 客户端
 │       └── manager.go          # WebDAV 文件上传
 ├── build/                      # 构建输出目录
@@ -121,8 +124,14 @@ go run cmd/main.go -d
 # 构建程序
 make build
 
+# 构建所有平台
+make build-all
+
 # 运行测试
 make test
+
+# 测试覆盖率
+make test-coverage
 
 # 代码格式化
 make fmt
@@ -189,29 +198,50 @@ beancount/
 
 ## 关键模块说明
 
-### 1. Telegram Bot (`internal/telegram/bot.go`)
+### 1. Telegram Bot (`internal/telegram/`)
 
-**职责**：处理 Telegram 消息和交互
+**文件职责**：
+- `bot.go`：Bot 核心逻辑、结构体定义、命令处理
+- `handlers.go`：图片处理、交易确认、消息回调处理
+- `utils.go`：消息发送、删除、追踪等工具函数
+
+**Bot 结构体**：
+```go
+type Bot struct {
+    config          *config.Config
+    beancountMgr    *beancount.Manager
+    llmParser       *llm.Parser
+    gitMgr          *git.Manager
+    webdavMgr       *webdav.Manager
+    botAPI          *tgbotapi.BotAPI
+    pendingTx       map[int]map[string]*beancount.PendingTransaction // 待确认交易
+    waitingForInput map[int]map[string]string                        // 等待输入状态
+    mu              sync.RWMutex
+    llmSemaphore    chan struct{} // LLM 并发控制
+}
+```
+
+**支持命令**：
+- `/start` - 显示欢迎信息
+- `/help` - 显示帮助信息
+- `/accounts` - 查看所有账户和分类
+- `/pending` - 查看待处理的交易列表
+- `/cancel` - 取消当前输入
 
 **核心功能**：
-- 接收用户发送的图片
+- 接收用户发送的图片（聊天图片和图片文件）
+- **支持回复 Bot 发送的图片进行识别**
 - 调用 LLM 解析图片
 - 显示交易确认界面（内联键盘）
-- 处理用户确认和修改
+- 处理用户确认、取消、重新识别、引导重试
 - 提交交易到 Beancount
 - 删除对话消息（可选）
 
 **重要概念**：
-- `pendingTx`：存储待确认的交易（按 userID 组织）
+- `pendingTx`：存储待确认的交易（按 userID -> transactionID 组织）
 - `ConversationHistory`：LLM 对话历史，支持多轮对话引导
-- `llmSemaphore`：控制 LLM 并发调用
-- `worker`：消息处理的 worker goroutine
-
-**关键方法**：
-- `Run()`：启动 Bot
-- `worker()`：处理消息的 worker
-- `handlePhoto()`：处理图片消息
-- `handleCallback()`：处理内联键盘回调
+- `llmSemaphore`：控制 LLM 并发调用（限制为 1）
+- `worker`：消息处理的 worker goroutine（5 个）
 
 ### 2. LLM 解析器 (`internal/llm/parser.go`)
 
@@ -286,18 +316,69 @@ beancount/
 **职责**：加载和管理配置
 
 **配置项**：
-- `Telegram`：Bot Token、允许的用户 ID、消息删除策略
+- `Telegram`：Bot Token、允许的用户 ID、消息删除策略、确认消息配置
 - `LLM`：API 地址、模型、超时、扩展提示词
 - `Beancount`：数据目录、标题、货币
 - `Git`：仓库地址、自动提交、推送超时、冲突策略
 - `Logging`：日志级别、目录、文件大小、备份数量
-- `WebDAV`：启用状态、URL、凭据、路径、文件名模板
+- `WebDAV`：启用状态、URL、凭据、路径、文件名模板、SSL 验证
 
 ## 数据类型
 
-### ConversationMessage
+### AccountType - 账户类型
 
-用于 LLM 多轮对话历史：
+```go
+type AccountType string
+
+const (
+    AccountTypeAssets      AccountType = "Assets"
+    AccountTypeExpenses    AccountType = "Expenses"
+    AccountTypeIncome      AccountType = "Income"
+    AccountTypeLiabilities AccountType = "Liabilities"
+    AccountTypeEquity      AccountType = "Equity"
+)
+```
+
+### TransactionType - 交易类型
+
+```go
+type TransactionType string
+
+const (
+    TransactionTypeExpense  TransactionType = "expense"
+    TransactionTypeIncome   TransactionType = "income"
+    TransactionTypeTransfer TransactionType = "transfer"
+)
+```
+
+### PostingData - 分录数据
+
+```go
+type PostingData struct {
+    Account  string `json:"account"`
+    Amount   string `json:"amount"`
+    Currency string `json:"currency"`
+    Flag     string `json:"flag"`
+}
+```
+
+### TransactionData - 交易数据
+
+```go
+type TransactionData struct {
+    DateTime          string            `json:"datetime"`
+    Flag              string            `json:"flag"`
+    Payee             string            `json:"payee"`
+    Narration         string            `json:"narration"`
+    Tags              []string          `json:"tags"`
+    Postings          []PostingData     `json:"postings"`
+    OrderID           string            `json:"order_id"`
+    Extra             map[string]string `json:"extra"`
+    SpecialDirectives []string          `json:"special_directives"`
+}
+```
+
+### ConversationMessage - LLM 对话消息
 
 ```go
 type ConversationMessage struct {
@@ -307,17 +388,37 @@ type ConversationMessage struct {
 }
 ```
 
-### PendingTransaction
-
-待确认的交易数据：
+### PendingTransaction - 待确认交易
 
 ```go
 type PendingTransaction struct {
     TransactionID           string
-    ConversationHistory     []ConversationMessage // LLM 对话历史
-    UserInputMessageIDs     []int                 // 用户输入消息ID列表
-    BotPromptMessageIDs     []int                 // Bot提示消息ID列表
-    // ... 其他字段
+    UserID                  int
+    Date                    string
+    Time                    string
+    Flag                    string
+    Payee                   string
+    Narration               string
+    Tags                    []string
+    Postings                []PostingData
+    OrderID                 string
+    Extra                   map[string]string
+    ImageURL                string
+    TempImageURL            string
+    TempWebDAVPath          string
+    EditingPostingIndex     int
+    AvailableAccounts       []string
+    AccountPage             int
+    LastMessageID           int
+    OriginalMessageID       int
+    EditingPostingMessageID int
+    PreviousMessageIDs      []int
+    SpecialDirectives       []string
+    UserOriginalMessageID   int
+    OriginalTempFilePath    string
+    ConversationHistory     []ConversationMessage
+    UserInputMessageIDs     []int
+    BotPromptMessageIDs     []int
 }
 ```
 
@@ -337,6 +438,16 @@ type PendingTransaction struct {
 8. **Git 推送**（可选）：自动推送到远程仓库
 9. **发送成功消息**：通知用户交易已记录
 10. **删除对话消息**：清理确认/取消后的所有对话消息
+
+### Bot 图片识别流程
+
+当用户回复 Bot 发送的图片时：
+
+1. **用户回复 Bot 图片**：Bot 检测到用户回复了 Bot 发送的消息
+2. **验证图片消息**：检查被回复的消息是否为 Bot 发送的图片
+3. **下载图片**：从 Telegram 服务器下载 Bot 发送的图片
+4. **复用处理流程**：调用 `processImage` 函数进行识别
+5. **正常记账流程**：与用户直接发送图片的处理流程相同
 
 ### LLM 多轮对话流程
 
@@ -402,6 +513,9 @@ A：在 `internal/beancount/types.go` 中添加类型，并在模板中添加对
 **Q：如何修改 LLM 并发数？**
 A：修改 `internal/telegram/bot.go` 中的 `llmSemaphore` 大小。
 
+**Q：如何支持 Bot 发送的图片识别？**
+A：已内置支持，用户只需回复 Bot 发送的图片即可触发识别流程。
+
 ## 贡献指南
 
 1. 遵循现有的代码风格和约定
@@ -420,4 +534,4 @@ MIT License
 
 ---
 
-**最后更新**：2026-03-19
+**最后更新**：2026-03-24
