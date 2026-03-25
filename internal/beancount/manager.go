@@ -61,7 +61,7 @@ func (m *Manager) initDirectories() error {
 	// 创建目录
 	dirs := []string{m.dataDir, m.accountDir, m.beansDir}
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
@@ -94,7 +94,7 @@ func (m *Manager) initAccountFiles() error {
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			// 创建默认账户文件
 			template := m.getAccountTemplate(accountType)
-			if err := os.WriteFile(filePath, []byte(template), 0644); err != nil {
+			if err := os.WriteFile(filePath, []byte(template), 0o644); err != nil {
 				return fmt.Errorf("failed to create account file %s: %w", filename, err)
 			}
 		}
@@ -142,7 +142,7 @@ func (m *Manager) initMainFile() error {
 			return fmt.Errorf("failed to load init.bean template: %w", err)
 		}
 
-		if err := os.WriteFile(initBeanPath, []byte(template), 0644); err != nil {
+		if err := os.WriteFile(initBeanPath, []byte(template), 0o644); err != nil {
 			return fmt.Errorf("failed to create init.bean file: %w", err)
 		}
 	}
@@ -176,7 +176,7 @@ include "init.bean"
 include "beans/**/*.bean"
 `)
 
-		if err := os.WriteFile(m.mainFile, []byte(builder.String()), 0644); err != nil {
+		if err := os.WriteFile(m.mainFile, []byte(builder.String()), 0o644); err != nil {
 			return fmt.Errorf("failed to create main file: %w", err)
 		}
 	}
@@ -202,7 +202,7 @@ func (m *Manager) GetTransactionFilePath(date time.Time) string {
 
 	// 按年月组织：beans/YYYY/MM.bean
 	yearDir := filepath.Join(m.beansDir, fmt.Sprintf("%d", year))
-	if err := os.MkdirAll(yearDir, 0755); err != nil {
+	if err := os.MkdirAll(yearDir, 0o755); err != nil {
 		logger.Errorf("创建目录失败: %v", err)
 		return ""
 	}
@@ -246,7 +246,7 @@ func (m *Manager) parseAccountFile(accountType AccountType) []string {
 	lines := strings.Split(string(content), "\n")
 
 	// 匹配 open 语句的正则表达式
-	re := regexp.MustCompile(`\bopen\s+([^\s]+)`)
+	re := regexp.MustCompile(`\bopen\s+(\S+)`)
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -350,7 +350,7 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 
 	// 确保文件存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		if err := os.WriteFile(filePath, []byte(""), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(""), 0o644); err != nil {
 			return "", fmt.Errorf("failed to create transaction file: %w", err)
 		}
 	}
@@ -365,7 +365,7 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 
 // appendToFile 追加内容到文件
 func (m *Manager) appendToFile(filePath, content string) error {
-	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0644)
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_WRONLY, 0o644)
 	if err != nil {
 		return err
 	}
@@ -424,7 +424,7 @@ func (m *Manager) AddTransactionWithDirectives(transaction *TransactionData) (st
 
 	// 确保文件存在
 	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		if err := os.WriteFile(filePath, []byte(""), 0644); err != nil {
+		if err := os.WriteFile(filePath, []byte(""), 0o644); err != nil {
 			return "", fmt.Errorf("failed to create transaction file: %w", err)
 		}
 	}

@@ -450,9 +450,9 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 
 	switch action {
 	case "confirm":
-		b.confirmTransaction(userID, transactionID, query.Message.MessageID)
+		b.confirmTransaction(userID, transactionID)
 	case "cancel":
-		b.cancelTransaction(userID, transactionID, query.Message.MessageID)
+		b.cancelTransaction(userID, transactionID)
 	case "rerun_recognition":
 		b.rerunRecognition(userID, transactionID, query.Message.MessageID)
 	case "guided_retry":

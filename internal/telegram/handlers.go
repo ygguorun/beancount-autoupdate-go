@@ -88,7 +88,13 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 		logger.Infof("开始调用 LLM 解析图片%s...", sourceType)
 		accounts := b.beancountMgr.GetAllCategories()
-		allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
+		allAccounts := append(
+			append(
+				append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...),
+				accounts[beancount.AccountTypeExpenses]...,
+			),
+			accounts[beancount.AccountTypeIncome]...,
+		)
 
 		logger.Infof("获取到账户数量: 资产=%d, 负债=%d, 支出=%d, 收入=%d",
 			len(accounts[beancount.AccountTypeAssets]),
@@ -98,11 +104,12 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 		var history []beancount.ConversationMessage
 		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, []string{}, nil, "")
-		if parseErr != nil {
+		switch {
+		case parseErr != nil:
 			logger.Errorf("LLM 解析失败: %v", parseErr)
-		} else if parseResult == nil {
+		case parseResult == nil:
 			logger.Warnf("LLM 解析返回空结果")
-		} else {
+		default:
 			logger.Infof("LLM 解析成功: payee=%s, narration=%s, postings=%d",
 				parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
 			// 保存对话历史以便后续使用
@@ -320,7 +327,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 		return
 	}
 
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		logger.Errorf("Failed to write document: %v", err)
 		b.sendReply(message, "❌ 下载文件失败")
 		return
@@ -398,7 +405,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 		return
 	}
 
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		logger.Errorf("Failed to write file: %v", err)
 		b.sendReply(message, "❌ 下载图片失败")
 		return
@@ -411,7 +418,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 }
 
 // confirmTransaction 确认交易
-func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int) {
+func (b *Bot) confirmTransaction(userID int, transactionID string) {
 	logger.Infof("确认交易: userID=%d, transactionID=%s", userID, transactionID)
 
 	b.mu.Lock()
@@ -588,7 +595,7 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 }
 
 // cancelTransaction 取消交易
-func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int) {
+func (b *Bot) cancelTransaction(userID int, transactionID string) {
 	logger.Infof("取消交易: userID=%d, transactionID=%s", userID, transactionID)
 
 	b.mu.Lock()
@@ -669,7 +676,13 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	// 调用 LLM 重新解析图片（清空历史，完全重新识别）
 	logger.Infof("开始调用 LLM 重新解析图片...")
 	accounts := b.beancountMgr.GetAllCategories()
-	allAccounts := append(append(append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...), accounts[beancount.AccountTypeExpenses]...), accounts[beancount.AccountTypeIncome]...)
+	allAccounts := append(
+		append(
+			append(accounts[beancount.AccountTypeAssets], accounts[beancount.AccountTypeLiabilities]...),
+			accounts[beancount.AccountTypeExpenses]...,
+		),
+		accounts[beancount.AccountTypeIncome]...,
+	)
 
 	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, []string{}, nil, "")
 	if err != nil {
@@ -760,7 +773,7 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 	b.mu.RLock()
 	if data, ok := b.pendingTx[userID][transactionID]; ok {
 		if len(data.ConversationHistory) > 0 {
-			historyInfo = fmt.Sprintf("已尝试 %d 次", int(len(data.ConversationHistory)/2))
+			historyInfo = fmt.Sprintf("已尝试 %d 次", len(data.ConversationHistory)/2)
 		}
 	}
 	b.mu.RUnlock()
@@ -835,7 +848,6 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 		data.ConversationHistory,
 		guidance,
 	)
-
 	if err != nil {
 		logger.Errorf("引导重试失败: %v", err)
 		b.handleGuidanceError(userID, transactionID, guidance, err)
@@ -1019,7 +1031,7 @@ func (b *Bot) downloadAndProcessBotPhoto(message *tgbotapi.Message, userID int, 
 		return
 	}
 
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		logger.Errorf("Failed to write bot photo: %v", err)
 		b.sendReply(message, "❌ 下载图片失败")
 		return
@@ -1106,7 +1118,7 @@ func (b *Bot) downloadAndProcessBotDocument(message *tgbotapi.Message, userID in
 		return
 	}
 
-	if err := os.WriteFile(tempFile, data, 0644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
 		logger.Errorf("Failed to write bot document: %v", err)
 		b.sendReply(message, "❌ 下载文件失败")
 		return

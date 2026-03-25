@@ -337,8 +337,8 @@ func (m *Manager) fileExists(filePath string) (bool, error) {
 }
 
 // createRequest 创建 HTTP 请求
-func (m *Manager) createRequest(method, path string, body io.Reader) (*http.Request, error) {
-	url := m.buildURL(path)
+func (m *Manager) createRequest(method, urlPath string, body io.Reader) (*http.Request, error) {
+	url := m.buildURL(urlPath)
 
 	req, err := http.NewRequest(method, url, body)
 	if err != nil {

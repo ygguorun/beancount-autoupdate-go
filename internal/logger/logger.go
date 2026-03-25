@@ -9,9 +9,7 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var (
-	log *logrus.Logger
-)
+var log *logrus.Logger
 
 // Init 初始化日志系统
 func Init(logDir, logFile, level string, maxBytes int64, backupCount int) error {
@@ -31,7 +29,7 @@ func Init(logDir, logFile, level string, maxBytes int64, backupCount int) error 
 	})
 
 	// 确保日志目录存在
-	if err := os.MkdirAll(logDir, 0755); err != nil {
+	if err := os.MkdirAll(logDir, 0o755); err != nil {
 		return err
 	}
 

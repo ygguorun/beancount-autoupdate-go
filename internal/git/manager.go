@@ -1,6 +1,7 @@
 package git
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -86,7 +87,7 @@ func (m *Manager) initRepo() error {
 
 // initEmptyRepo 初始化空仓库
 func (m *Manager) initEmptyRepo() error {
-	if err := os.MkdirAll(m.repoPath, 0755); err != nil {
+	if err := os.MkdirAll(m.repoPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create repo directory: %w", err)
 	}
 
@@ -409,7 +410,6 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 			When:  time.Now(),
 		},
 	})
-
 	if err != nil {
 		logger.Errorf("Git 提交失败: %v", err)
 		return false, fmt.Errorf("failed to commit: %w", err)
@@ -454,12 +454,13 @@ func (m *Manager) PushChanges() (bool, error) {
 	// 先拉取以避免冲突
 	logger.Infof("先拉取远程更改以避免冲突...")
 	pullSuccess, pullErr := m.PullChanges()
-	if pullErr != nil {
+	switch {
+	case pullErr != nil:
 		logger.Errorf("拉取远程更改失败: %v", pullErr)
 		// 继续尝试推送
-	} else if pullSuccess {
+	case pullSuccess:
 		logger.Infof("拉取远程更改成功")
-	} else {
+	default:
 		logger.Infof("没有远程更改需要拉取")
 	}
 
@@ -527,7 +528,7 @@ func (m *Manager) PullChanges() (bool, error) {
 
 	if err := worktree.Pull(pullOptions); err != nil {
 		// 没有更新或错误
-		if err == git.NoErrAlreadyUpToDate {
+		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			logger.Infof("远程仓库已是最新")
 			return false, nil
 		}

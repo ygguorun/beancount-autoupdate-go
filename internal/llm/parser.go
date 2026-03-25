@@ -58,7 +58,12 @@ func (p *Parser) ParseImage(imagePath string, expenseCategories, incomeCategorie
 
 // ParseImageWithHistory 带对话历史的图片解析（支持重试）
 // userPromptOverride 用于引导重试时传入用户引导文字，为空时使用默认提示词
-func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage, userPromptOverride string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) ParseImageWithHistory(
+	imagePath string,
+	accountNames, tagNames []string,
+	history []beancount.ConversationMessage,
+	userPromptOverride string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	// 编码图片
 	base64Image, err := p.encodeImage(imagePath)
 	if err != nil {
@@ -114,7 +119,12 @@ func (p *Parser) ParseImageWithHistory(imagePath string, accountNames, tagNames 
 }
 
 // ParseWithGuidance 带引导文字的重新解析
-func (p *Parser) ParseWithGuidance(imagePath string, accountNames, tagNames []string, history []beancount.ConversationMessage, userGuidance string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) ParseWithGuidance(
+	imagePath string,
+	accountNames, tagNames []string,
+	history []beancount.ConversationMessage,
+	userGuidance string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	// 不再直接修改历史，让 ParseImageWithHistory 通过 updateHistory 保存用户引导
 	return p.ParseImageWithHistory(imagePath, accountNames, tagNames, history, userGuidance)
 }
@@ -123,10 +133,14 @@ func (p *Parser) ParseWithGuidance(imagePath string, accountNames, tagNames []st
 func (p *Parser) ParseImageFromBytes(imageData []byte, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
 	// 创建临时文件
 	tempFile := fmt.Sprintf("/tmp/beancount_temp_%d.jpg", time.Now().UnixNano())
-	if err := os.WriteFile(tempFile, imageData, 0644); err != nil {
+	if err := os.WriteFile(tempFile, imageData, 0o644); err != nil {
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
-	defer os.Remove(tempFile)
+	defer func() {
+		if err := os.Remove(tempFile); err != nil {
+			logger.Warnf("删除临时文件失败: %v", err)
+		}
+	}()
 
 	return p.ParseImage(tempFile, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames)
 }
@@ -219,7 +233,7 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 	}
 
 	// 替换占位符
-	prompt := string(templateContent)
+	prompt := templateContent
 	prompt = strings.ReplaceAll(prompt, "{current_time}", currentTime)
 	prompt = strings.ReplaceAll(prompt, "{account_names}", accountList)
 	prompt = strings.ReplaceAll(prompt, "{tags}", tagList)
@@ -310,7 +324,11 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 }
 
 // callWithStructuredOutput 使用 Structured Outputs 调用
-func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage, prompt, imageBase64 string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) callWithStructuredOutput(
+	messages []openai.ChatCompletionMessageParamUnion,
+	history []beancount.ConversationMessage,
+	prompt, imageBase64 string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
@@ -328,7 +346,6 @@ func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessag
 			},
 		},
 	})
-
 	if err != nil {
 		// 检查是否是不支持 Structured Outputs 的错误
 		if isStructuredOutputUnsupported(err) {
@@ -363,7 +380,11 @@ func (p *Parser) callWithStructuredOutput(messages []openai.ChatCompletionMessag
 }
 
 // callWithJSONMode 降级方案：使用普通 JSON 模式
-func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUnion, history []beancount.ConversationMessage, prompt, imageBase64 string) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+func (p *Parser) callWithJSONMode(
+	messages []openai.ChatCompletionMessageParamUnion,
+	history []beancount.ConversationMessage,
+	prompt, imageBase64 string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 
@@ -374,7 +395,6 @@ func (p *Parser) callWithJSONMode(messages []openai.ChatCompletionMessageParamUn
 			OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
 		},
 	})
-
 	if err != nil {
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
