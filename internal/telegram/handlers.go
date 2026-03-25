@@ -18,8 +18,9 @@ import (
 )
 
 // processImage 处理图片识别的公共逻辑
-// isBotPhoto: 是否为 Bot 发送的图片（Bot 发送的图片不应被删除）
-func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string, isBotPhoto bool) {
+// message: 图片来源消息（用户发送的图片消息或Bot发送的图片消息）
+// extraContextMessageIDs: 额外的对话上下文消息ID（如用户回复Bot图片的消息ID）
+func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string, extraContextMessageIDs []int) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
 	// 先生成唯一的交易ID，包含随机数以避免冲突
@@ -115,14 +116,14 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 	if parseErr != nil {
 		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
-		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID)
+		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID, extraContextMessageIDs)
 		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
-		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID)
+		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID, extraContextMessageIDs)
 		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
 		return
 	}
@@ -153,31 +154,33 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 	if b.pendingTx[userID] == nil {
 		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
 	}
+	// 初始化对话上下文消息ID列表
+	contextMessageIDs := make([]int, 0, len(extraContextMessageIDs)+1)
+	contextMessageIDs = append(contextMessageIDs, extraContextMessageIDs...)
 	b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
-		TransactionID:         transactionID,
-		UserID:                userID,
-		Date:                  transactionTime.Format("2006-01-02"),
-		Time:                  transactionTime.Format("15:04:05"),
-		Flag:                  parseResult.Flag,
-		Payee:                 parseResult.Payee,
-		Narration:             parseResult.Narration,
-		Tags:                  parseResult.Tags,
-		Postings:              parseResult.Postings,
-		OrderID:               parseResult.OrderID,
-		Extra:                 parseResult.Extra,
-		OriginalTempFilePath:  tempFile,
-		ImageURL:              "",
-		TempImageURL:          uploadResult,
-		TempWebDAVPath:        actualTempWebDAVPath,
-		SpecialDirectives:     parseResult.SpecialDirectives,
-		UserOriginalMessageID: message.MessageID,
-		IsBotPhoto:            isBotPhoto,
-		ConversationHistory:   parseHistory,
-		BotPromptMessageIDs:   []int{},
+		TransactionID:                 transactionID,
+		UserID:                        userID,
+		Date:                          transactionTime.Format("2006-01-02"),
+		Time:                          transactionTime.Format("15:04:05"),
+		Flag:                          parseResult.Flag,
+		Payee:                         parseResult.Payee,
+		Narration:                     parseResult.Narration,
+		Tags:                          parseResult.Tags,
+		Postings:                      parseResult.Postings,
+		OrderID:                       parseResult.OrderID,
+		Extra:                         parseResult.Extra,
+		OriginalTempFilePath:          tempFile,
+		ImageURL:                      "",
+		TempImageURL:                  uploadResult,
+		TempWebDAVPath:                actualTempWebDAVPath,
+		SpecialDirectives:             parseResult.SpecialDirectives,
+		SourceImageMessageID:          message.MessageID,
+		ConversationContextMessageIDs: contextMessageIDs,
+		ConversationHistory:           parseHistory,
 	}
 	// 追踪识别提示消息
 	if promptMessageID > 0 {
-		b.pendingTx[userID][transactionID].BotPromptMessageIDs = append(b.pendingTx[userID][transactionID].BotPromptMessageIDs, promptMessageID)
+		b.pendingTx[userID][transactionID].ConversationContextMessageIDs = append(b.pendingTx[userID][transactionID].ConversationContextMessageIDs, promptMessageID)
 	}
 	b.mu.Unlock()
 
@@ -190,21 +193,24 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 }
 
 // createPendingTxWithError 创建带错误的待确认交易（用于重新识别）
-func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFile string, messageID int, promptMessageID int) {
+func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFile string, messageID int, promptMessageID int, extraContextMessageIDs []int) {
 	b.mu.Lock()
 	if b.pendingTx[userID] == nil {
 		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
 	}
+	// 初始化对话上下文消息ID列表
+	contextMessageIDs := make([]int, 0, len(extraContextMessageIDs)+1)
+	contextMessageIDs = append(contextMessageIDs, extraContextMessageIDs...)
 	b.pendingTx[userID][transactionID] = &beancount.PendingTransaction{
-		TransactionID:        transactionID,
-		UserID:               userID,
-		OriginalTempFilePath: tempFile,
-		LastMessageID:        messageID,
-		OriginalMessageID:    messageID,
-		BotPromptMessageIDs:  []int{},
+		TransactionID:                 transactionID,
+		UserID:                        userID,
+		OriginalTempFilePath:          tempFile,
+		LastMessageID:                 messageID,
+		OriginalMessageID:             messageID,
+		ConversationContextMessageIDs: contextMessageIDs,
 	}
 	if promptMessageID > 0 {
-		b.pendingTx[userID][transactionID].BotPromptMessageIDs = append(b.pendingTx[userID][transactionID].BotPromptMessageIDs, promptMessageID)
+		b.pendingTx[userID][transactionID].ConversationContextMessageIDs = append(b.pendingTx[userID][transactionID].ConversationContextMessageIDs, promptMessageID)
 	}
 	b.mu.Unlock()
 }
@@ -328,7 +334,7 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
 
 	// 调用公共处理函数
-	b.processImage(message, userID, tempFile, ext, "文件", false)
+	b.processImage(message, userID, tempFile, ext, "文件", nil)
 }
 
 // handlePhoto 处理照片
@@ -401,7 +407,7 @@ func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s", userID, tempFile)
 
 	// 调用公共处理函数
-	b.processImage(message, userID, tempFile, ".jpg", "", false)
+	b.processImage(message, userID, tempFile, ".jpg", "", nil)
 }
 
 // confirmTransaction 确认交易
@@ -541,8 +547,8 @@ func (b *Bot) confirmTransaction(userID int, transactionID string, messageID int
 	b.mu.Lock()
 	data, ok = b.pendingTx[userID][transactionID]
 	if ok {
-		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserOriginalMessageID=%d, UserInputMessageIDs=%v, BotPromptMessageIDs=%v",
-			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserOriginalMessageID, data.UserInputMessageIDs, data.BotPromptMessageIDs)
+		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, SourceImageMessageID=%d, ConversationContextMessageIDs=%v",
+			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.SourceImageMessageID, data.ConversationContextMessageIDs)
 
 		// 使用清理函数
 		b.cleanupTransactionMessages(userID, transactionID, data, false, true)
@@ -595,8 +601,8 @@ func (b *Bot) cancelTransaction(userID int, transactionID string, messageID int)
 		return
 	}
 
-	logger.Infof("取消交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, UserInputMessageIDs=%v, BotPromptMessageIDs=%v",
-		transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.UserInputMessageIDs, data.BotPromptMessageIDs)
+	logger.Infof("取消交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, ConversationContextMessageIDs=%v",
+		transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.ConversationContextMessageIDs)
 
 	// 使用清理函数（删除WebDAV临时文件，保留用户原始图片）
 	b.cleanupTransactionMessages(userID, transactionID, data, true, false)
@@ -1021,8 +1027,10 @@ func (b *Bot) downloadAndProcessBotPhoto(message *tgbotapi.Message, userID int, 
 
 	logger.Infof("成功下载 Bot 发送的图片，临时文件: %s", tempFile)
 
-	// 调用公共处理函数（使用被回复的消息作为原始消息引用，isBotPhoto=true 表示不删除 Bot 发送的图片）
-	b.processImage(replyToMsg, userID, tempFile, ".jpg", "（Bot发送）", true)
+	// 调用公共处理函数
+	// replyToMsg 是 Bot 发送的图片消息，存储到 SourceImageMessageID
+	// message.MessageID 是用户回复消息，存储到 ConversationContextMessageIDs
+	b.processImage(replyToMsg, userID, tempFile, ".jpg", "（Bot发送）", []int{message.MessageID})
 }
 
 // downloadAndProcessBotDocument 下载并处理 Bot 发送的图片文件
@@ -1106,6 +1114,8 @@ func (b *Bot) downloadAndProcessBotDocument(message *tgbotapi.Message, userID in
 
 	logger.Infof("成功下载 Bot 发送的图片文件，临时文件: %s, 原始文件名: %s", tempFile, document.FileName)
 
-	// 调用公共处理函数（使用被回复的消息作为原始消息引用，isBotPhoto=true 表示不删除 Bot 发送的图片）
-	b.processImage(replyToMsg, userID, tempFile, ext, "文件（Bot发送）", true)
+	// 调用公共处理函数
+	// replyToMsg 是 Bot 发送的图片消息，存储到 SourceImageMessageID
+	// message.MessageID 是用户回复消息，存储到 ConversationContextMessageIDs
+	b.processImage(replyToMsg, userID, tempFile, ext, "文件（Bot发送）", []int{message.MessageID})
 }

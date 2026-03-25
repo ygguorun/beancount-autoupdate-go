@@ -51,8 +51,8 @@ func (b *Bot) trackUserMessage(userID int, transactionID string, messageID int) 
 	defer b.mu.Unlock()
 	if txMap, ok := b.pendingTx[userID]; ok {
 		if data, ok := txMap[transactionID]; ok {
-			data.UserInputMessageIDs = append(data.UserInputMessageIDs, messageID)
-			logger.Infof("追踪用户消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.UserInputMessageIDs))
+			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
+			logger.Infof("追踪用户消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
 		}
 	}
 }
@@ -66,17 +66,17 @@ func (b *Bot) trackBotMessage(userID int, transactionID string, messageID int) {
 	defer b.mu.Unlock()
 	if txMap, ok := b.pendingTx[userID]; ok {
 		if data, ok := txMap[transactionID]; ok {
-			data.BotPromptMessageIDs = append(data.BotPromptMessageIDs, messageID)
-			logger.Infof("追踪Bot消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.BotPromptMessageIDs))
+			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
+			logger.Infof("追踪Bot消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
 		}
 	}
 }
 
 // cleanupTransactionMessages 清理交易相关的所有消息和临时文件
 // deleteWebDAV: 是否删除 WebDAV 临时文件（取消时删除）
-// deleteUserImage: 是否删除用户原始图片消息（确认时根据配置决定）
-func (b *Bot) cleanupTransactionMessages(userID int, transactionID string, data *beancount.PendingTransaction, deleteWebDAV bool, deleteUserImage bool) {
-	logger.Infof("清理交易消息: transactionID=%s, deleteWebDAV=%v, deleteUserImage=%v", transactionID, deleteWebDAV, deleteUserImage)
+// deleteSourceImage: 是否删除源图片消息（确认时根据配置决定）
+func (b *Bot) cleanupTransactionMessages(userID int, transactionID string, data *beancount.PendingTransaction, deleteWebDAV bool, deleteSourceImage bool) {
+	logger.Infof("清理交易消息: transactionID=%s, deleteWebDAV=%v, deleteSourceImage=%v", transactionID, deleteWebDAV, deleteSourceImage)
 
 	// 删除 WebDAV 临时文件
 	if deleteWebDAV && data.TempWebDAVPath != "" && b.webdavMgr != nil {
@@ -101,16 +101,10 @@ func (b *Bot) cleanupTransactionMessages(userID int, transactionID string, data 
 		b.deleteMessages(userID, data.PreviousMessageIDs)
 	}
 
-	// 删除用户输入的文本消息
-	if len(data.UserInputMessageIDs) > 0 {
-		logger.Infof("删除当前交易 %s 的用户输入消息: %v", transactionID, data.UserInputMessageIDs)
-		b.deleteMessages(userID, data.UserInputMessageIDs)
-	}
-
-	// 删除 Bot 发送的提示消息
-	if len(data.BotPromptMessageIDs) > 0 {
-		logger.Infof("删除当前交易 %s 的 Bot 提示消息: %v", transactionID, data.BotPromptMessageIDs)
-		b.deleteMessages(userID, data.BotPromptMessageIDs)
+	// 删除对话上下文消息（用户回复、Bot 提示、用户引导文本等）
+	if len(data.ConversationContextMessageIDs) > 0 {
+		logger.Infof("删除当前交易 %s 的对话上下文消息: %v", transactionID, data.ConversationContextMessageIDs)
+		b.deleteMessages(userID, data.ConversationContextMessageIDs)
 	}
 
 	// 删除原始预览消息（如果存在且不在 PreviousMessageIDs 中）
@@ -133,13 +127,13 @@ func (b *Bot) cleanupTransactionMessages(userID int, transactionID string, data 
 		}
 	}
 
-	// 根据参数删除原始图片消息
+	// 根据参数删除源图片消息
 	// 确认时根据 DeleteUserMessage 配置决定是否删除，取消时不删除
-	if deleteUserImage && b.config.Telegram.DeleteUserMessage && data.UserOriginalMessageID > 0 {
-		logger.Infof("删除当前交易 %s 的原始图片消息: %d", transactionID, data.UserOriginalMessageID)
-		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.UserOriginalMessageID)
+	if deleteSourceImage && b.config.Telegram.DeleteUserMessage && data.SourceImageMessageID > 0 {
+		logger.Infof("删除当前交易 %s 的源图片消息: %d", transactionID, data.SourceImageMessageID)
+		deleteMsg := tgbotapi.NewDeleteMessage(int64(userID), data.SourceImageMessageID)
 		if _, err := b.botAPI.Request(deleteMsg); err != nil {
-			logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.UserOriginalMessageID, err)
+			logger.Errorf("删除消息失败: transactionID=%s, messageID=%d, error=%v", transactionID, data.SourceImageMessageID, err)
 		}
 	}
 }

@@ -35,12 +35,12 @@ type TelegramConfig struct {
 
 // LLMConfig LLM 配置
 type LLMConfig struct {
-	BaseURL       string `toml:"base_url"`
-	Model         string `toml:"model"`
-	APIKey        string `toml:"api_key"`
-	Timeout       int    `toml:"timeout"`
-	ExtendPrompt  string `toml:"extend_prompt"`   // 额外的 prompt，可以是 "append" 或 "replace"
-	MaxImageSize  int    `toml:"max_image_size"`  // 图片最大尺寸限制（宽度或高度），0 表示不限制
+	BaseURL      string `toml:"base_url"`
+	Model        string `toml:"model"`
+	APIKey       string `toml:"api_key"`
+	Timeout      int    `toml:"timeout"`
+	ExtendPrompt string `toml:"extend_prompt"`  // 额外的 prompt，可以是 "append" 或 "replace"
+	MaxImageSize int    `toml:"max_image_size"` // 图片最大尺寸限制（宽度或高度），0 表示不限制
 }
 
 // BeancountConfig Beancount 配置
