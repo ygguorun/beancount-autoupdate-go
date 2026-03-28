@@ -48,18 +48,6 @@ run:
 	@echo "运行程序..."
 	$(GORUN) $(CMD_DIR)/main.go
 
-# 测试 Git 功能
-.PHONY: test-git
-test-git:
-	@echo "测试 Git 功能..."
-	$(GORUN) $(CMD_DIR)/test-git.go
-
-# 测试嵌入模板
-.PHONY: test-embed
-test-embed:
-	@echo "测试嵌入模板..."
-	$(GORUN) $(CMD_DIR)/test-embed.go
-
 # 构建
 .PHONY: build
 build:

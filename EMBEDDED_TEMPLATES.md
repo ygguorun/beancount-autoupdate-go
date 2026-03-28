@@ -61,25 +61,14 @@ make build
 
 ## 测试嵌入的模板
 
-运行测试命令验证嵌入的模板：
+当前没有独立的模板测试命令。
 
 ```bash
-make test-embed
+make run
 ```
 
-输出示例：
-```
-测试嵌入的模板...
-✅ 模板初始化成功
-✅ assets.bean: 4880 字符
-✅ equity.bean: 244 字符
-✅ expenses.bean: 2616 字符
-✅ income.bean: 2454 字符
-✅ liabilities.bean: 5458 字符
-✅ receipt_image_recognition.txt: 6100 字符
-
-所有模板测试完成！
-```
+程序启动时会在 `cmd/main.go` 中调用 `embed.InitTemplates()`，
+初始化失败会直接退出。若应用正常启动，表示模板已成功加载。
 
 ## 优势
 
