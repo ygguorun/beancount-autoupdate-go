@@ -46,7 +46,8 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 
 🔧 交互修改
 - 识别结果会显示预览界面
-- 可以修改金额、账户、分类、备注等字段
+- 可以通过“💬 引导重试”告诉 Bot 如何修正识别结果
+- 也可以使用“🔄 重新识别”让 Bot 重新解析图片
 - 支持确认提交或取消操作
 
 🔄 多交易处理

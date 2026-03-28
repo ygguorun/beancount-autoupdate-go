@@ -60,15 +60,15 @@ func (b *Bot) handleMessage(update tgbotapi.Update) {
 		return
 	}
 
-	// 处理回复 Bot 发送的图片
-	if message.ReplyToMessage != nil && b.isBotPhotoMessage(message.ReplyToMessage) {
-		b.handleReplyToBotPhoto(message)
-		return
-	}
-
 	// 处理命令
 	if message.IsCommand() {
 		b.handleCommand(message)
+		return
+	}
+
+	// 处理回复 Bot 发送的图片
+	if message.ReplyToMessage != nil && b.isBotPhotoMessage(message.ReplyToMessage) {
+		b.handleReplyToBotPhoto(message)
 		return
 	}
 
@@ -176,5 +176,8 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 		b.rerunRecognition(userID, transactionID, query.Message.MessageID)
 	case "guided_retry":
 		b.startGuidedRetry(userID, transactionID, query.Message.MessageID)
+	default:
+		logger.Warnf("未知回调操作: userID=%d, transactionID=%s, action=%s", userID, transactionID, action)
+		b.sendMessageWithNilKeyboard(userID, "⚠️ 该操作已失效，请重新发送图片或使用 /pending 查看待处理交易")
 	}
 }

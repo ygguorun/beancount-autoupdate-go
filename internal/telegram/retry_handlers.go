@@ -34,6 +34,7 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 
 	if transactionID == "" {
 		logger.Infof("用户 %d 不在等待输入状态", userID)
+		b.sendReply(message, "💡 请先发送账单图片开始识别，或使用 /help 查看用法")
 		return
 	}
 

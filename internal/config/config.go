@@ -26,11 +26,9 @@ type Config struct {
 
 // TelegramConfig Telegram Bot 配置
 type TelegramConfig struct {
-	Token                            string `toml:"token"`
-	AllowedUserIDs                   []int  `toml:"allowed_user_ids"`
-	DeleteUserMessage                bool   `toml:"delete_user_message"`                 // 是否在确认提交后删除用户发送的图片消息
-	SendConfirmationMessage          bool   `toml:"send_confirmation_message"`           // 普通交易确认提交后是否发送成功消息
-	SendDirectiveConfirmationMessage bool   `toml:"send_directive_confirmation_message"` // 特殊指令确认提交后是否发送成功消息
+	Token             string `toml:"token"`
+	AllowedUserIDs    []int  `toml:"allowed_user_ids"`
+	DeleteUserMessage bool   `toml:"delete_user_message"` // 是否在确认提交后删除用户发送的图片消息
 }
 
 // LLMConfig LLM 配置

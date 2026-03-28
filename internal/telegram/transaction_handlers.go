@@ -270,7 +270,6 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 
 	transactionTime, _ := time.Parse("2006-01-02 15:04:05", data.Date+" "+data.Time)
 
-	var entry string
 	var err error
 
 	if len(data.SpecialDirectives) > 0 {
@@ -285,9 +284,9 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 			Extra:             data.Extra,
 			SpecialDirectives: data.SpecialDirectives,
 		}
-		entry, err = b.beancountMgr.AddTransactionWithDirectives(transactionData)
+		_, err = b.beancountMgr.AddTransactionWithDirectives(transactionData)
 	} else {
-		entry, err = b.beancountMgr.AddTransactionFromPostings(
+		_, err = b.beancountMgr.AddTransactionFromPostings(
 			transactionTime,
 			data.Flag,
 			data.Payee,
@@ -359,23 +358,13 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 	}
 	b.mu.Unlock()
 
-	hasDirectives := len(data.SpecialDirectives) > 0
-	sendMessage := false
-
-	if hasDirectives {
-		sendMessage = b.config.Telegram.SendDirectiveConfirmationMessage
-		logger.Infof("特殊指令提交，SendDirectiveConfirmationMessage 配置: %v", sendMessage)
-	} else {
-		sendMessage = b.config.Telegram.SendConfirmationMessage
-		logger.Infof("普通交易提交，SendConfirmationMessage 配置: %v", sendMessage)
-	}
-
-	if sendMessage {
-		response := fmt.Sprintf("✅ 交易已成功记录！\n\n📝 条目内容：\n%s", entry)
-		b.sendMessageWithNilKeyboard(userID, response)
-	} else {
-		logger.Infof("根据配置跳过发送成功消息")
-	}
+	response := fmt.Sprintf(
+		"✅ 交易已记录\n\n🆔 交易ID: %s\n📅 日期: %s\n🏷️ 对象: %s\n\n🔒 详情已脱敏，如需核对请在账本或 Git 记录中查看",
+		shortTransactionID(transactionID),
+		data.Date,
+		maskPayee(data.Payee),
+	)
+	b.sendMessageWithNilKeyboard(userID, response)
 }
 
 // cancelTransaction 取消交易
@@ -406,4 +395,25 @@ func (b *Bot) cancelTransaction(userID int, transactionID string) {
 	}
 
 	b.sendMessageWithNilKeyboard(userID, "❌ 交易已取消")
+}
+
+func shortTransactionID(transactionID string) string {
+	if len(transactionID) <= 6 {
+		return transactionID
+	}
+	return transactionID[len(transactionID)-6:]
+}
+
+func maskPayee(payee string) string {
+	trimmed := strings.TrimSpace(payee)
+	if trimmed == "" {
+		return "未识别"
+	}
+
+	runes := []rune(trimmed)
+	if len(runes) <= 2 {
+		return string(runes[0]) + "*"
+	}
+
+	return string(runes[0]) + "**" + string(runes[len(runes)-1])
 }
