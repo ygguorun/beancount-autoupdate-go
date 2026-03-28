@@ -48,7 +48,6 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 	}
 
 	b.trackUserMessage(userID, transactionID, message.MessageID)
-	b.sendReply(message, fmt.Sprintf("🔄 已应用到交易 #%s，正在根据您的引导重新识别...", shortTransactionID(transactionID)))
 	b.handleGuidanceInput(userID, transactionID, guidance)
 }
 
@@ -372,8 +371,10 @@ func (b *Bot) sendRetryErrorKeyboard(userID int, transactionID string) {
 	)
 	msg := tgbotapi.NewMessage(int64(userID), "❌ 重新识别失败\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
 	msg.ReplyMarkup = &keyboard
-	if _, err := b.botAPI.Send(msg); err != nil {
+	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
+	} else {
+		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 
@@ -538,8 +539,10 @@ func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance str
 	}
 	msg.ReplyMarkup = &keyboard
 
-	if _, sendErr := b.botAPI.Send(msg); sendErr != nil {
+	if sentMsg, sendErr := b.botAPI.Send(msg); sendErr != nil {
 		logger.Errorf("发送消息失败: %v", sendErr)
+	} else {
+		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 

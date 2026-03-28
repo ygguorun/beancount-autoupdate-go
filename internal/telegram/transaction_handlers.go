@@ -221,8 +221,10 @@ func (b *Bot) sendRecognitionErrorKeyboard(userID int, transactionID string, rep
 	msg := tgbotapi.NewMessage(int64(userID), "❌ 无法识别图片中的交易信息\n\n请确保图片清晰，包含完整的交易信息（日期、金额、交易对象等）\n或尝试重新上传。")
 	msg.ReplyMarkup = &keyboard
 	msg.ReplyToMessageID = replyToMessageID
-	if _, err := b.botAPI.Send(msg); err != nil {
+	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
+	} else {
+		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 
@@ -409,10 +411,22 @@ func (b *Bot) cancelTransaction(userID int, transactionID string) {
 }
 
 func shortTransactionID(transactionID string) string {
-	if len(transactionID) <= 6 {
-		return transactionID
+	normalized := make([]rune, 0, len(transactionID))
+	for _, r := range transactionID {
+		if (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+			normalized = append(normalized, r)
+		}
 	}
-	return transactionID[len(transactionID)-6:]
+
+	if len(normalized) == 0 {
+		return "NA"
+	}
+
+	if len(normalized) > 6 {
+		normalized = normalized[len(normalized)-6:]
+	}
+
+	return strings.ToUpper(string(normalized))
 }
 
 func maskPayee(payee string) string {
