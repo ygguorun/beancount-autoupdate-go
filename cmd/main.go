@@ -1,16 +1,19 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/config"
 	"beancount-autoupdate/internal/embed"
 	"beancount-autoupdate/internal/git"
+	"beancount-autoupdate/internal/httpingest"
 	"beancount-autoupdate/internal/llm"
 	"beancount-autoupdate/internal/logger"
 	"beancount-autoupdate/internal/telegram"
@@ -171,8 +174,18 @@ func main() {
 	}
 
 	logger.Info("所有模块初始化完成！")
+
+	// 初始化 HTTP 上传服务（如果启用）
+	var ingestServer *httpingest.Server
+	if cfg.HTTPServer.Enabled {
+		ingestServer = httpingest.NewServer(cfg.HTTPServer, bot)
+	}
+
 	logger.Info("========================================")
 	logger.Info("Bot 正在运行...")
+	if ingestServer != nil {
+		logger.Infof("HTTP 上传服务已启用: %s", cfg.HTTPServer.ListenAddr)
+	}
 	logger.Info("按 Ctrl+C 退出")
 
 	// 运行 Bot
@@ -182,11 +195,26 @@ func main() {
 		}
 	}()
 
+	if ingestServer != nil {
+		go func() {
+			if err := ingestServer.Run(); err != nil {
+				logger.Errorf("HTTP 上传服务运行出错: %v", err)
+			}
+		}()
+	}
+
 	// 等待中断信号
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 	<-sigChan
 
 	logger.Info("收到中断信号，正在关闭...")
+	if ingestServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ingestServer.Shutdown(shutdownCtx); err != nil {
+			logger.Warnf("关闭 HTTP 上传服务失败: %v", err)
+		}
+	}
 	logger.Info("Beancount AutoUpdate 已停止")
 }

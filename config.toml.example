@@ -86,3 +86,12 @@ password = ""  # 密码（从环境变量 WEBDAV_PASSWORD 读取）
 path = "path/to/receipts"  # 上传路径
 filename_template = "{datetime}_{order_id}_{uuid}.jpg"  # 文件名模板，支持变量: {date}, {order_id}, {datetime}, {uuid}
 verify_ssl = true  # 是否验证 SSL 证书
+
+[http_server]
+# HTTP 上传服务（可选）
+enabled = false
+listen_addr = "127.0.0.1:8080"
+target_user_id = 0  # 启用时必填，上传图片将投递到该 Telegram 用户
+max_upload_size_mb = 20
+read_timeout_sec = 15
+write_timeout_sec = 30

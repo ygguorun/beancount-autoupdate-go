@@ -54,11 +54,6 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 		b.sendReply(message, "❌ 下载文件失败")
 		return
 	}
-	defer func() {
-		if removeErr := os.Remove(tempFile); removeErr != nil {
-			logger.Errorf("删除临时文件失败: %v", removeErr)
-		}
-	}()
 
 	logger.Infof("开始处理用户 %d 的图片文件，文件: %s, 原始文件名: %s", userID, tempFile, document.FileName)
 	b.processImage(message, userID, tempFile, ext, "文件", nil)

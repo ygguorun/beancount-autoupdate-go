@@ -10,6 +10,7 @@
 - 🔄 **Git 同步** - 支持自动提交和自动推送
 - ☁️ **WebDAV 上传** - 识别图片可上传至 WebDAV 并在确认后重命名
 - 🔒 **隐私友好回执** - 提交成功后返回脱敏提示（不回传完整分录明细）
+- 🌐 **HTTP 上传入口** - 可通过 API 上传图片并接入同一条 Bot 识别流程
 
 ## 项目结构
 
@@ -95,6 +96,32 @@ make build
 - 脱敏后的交易对象
 
 不会返回完整分录明细与金额，详细内容请在账本文件或 Git 记录中查看。
+
+## HTTP 上传接口
+
+启用配置后，可通过 HTTP API 上传图片并进入同一 Bot 识别流程。
+
+### 配置
+
+`[http_server]` 关键项：
+
+- `enabled`：是否启用 HTTP 上传服务
+- `listen_addr`：监听地址（建议保持 `127.0.0.1:8080`，由 NGINX 反向代理）
+- `target_user_id`：上传图片对应的 Telegram 用户 ID
+- `max_upload_size_mb`：上传大小限制（MB）
+
+### 接口
+
+- `POST /v1/receipts`
+- Content-Type: `multipart/form-data`
+- 表单字段：`file`（图片文件）
+
+示例：
+
+```bash
+curl -X POST "http://127.0.0.1:8080/v1/receipts" \
+  -F "file=@/path/to/receipt.jpg"
+```
 
 ## 配置说明（节选）
 

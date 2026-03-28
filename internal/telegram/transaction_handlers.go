@@ -18,12 +18,23 @@ import (
 // message: 图片来源消息（用户发送的图片消息或Bot发送的图片消息）
 // extraContextMessageIDs: 额外的对话上下文消息ID（如用户回复Bot图片的消息ID）
 func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile string, fileExt string, sourceType string, extraContextMessageIDs []int) {
+	b.processImageCore(userID, tempFile, fileExt, sourceType, extraContextMessageIDs, message.MessageID, message.Chat.ID)
+}
+
+// ProcessExternalImage 处理外部 HTTP 上传图片并接入 Bot 识别流程。
+func (b *Bot) ProcessExternalImage(userID int, tempFile string, fileExt string) {
+	b.processImageCore(userID, tempFile, fileExt, "（HTTP上传）", nil, 0, int64(userID))
+}
+
+func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sourceType string, extraContextMessageIDs []int, sourceMessageID int, chatID int64) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
 	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.Intn(10000))
 
-	msg := tgbotapi.NewMessage(message.Chat.ID, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
-	msg.ReplyToMessageID = message.MessageID
+	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
+	if sourceMessageID > 0 {
+		msg.ReplyToMessageID = sourceMessageID
+	}
 	var promptMessageID int
 	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
@@ -105,15 +116,15 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 
 	if parseErr != nil {
 		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
-		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID, extraContextMessageIDs)
-		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
+		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs)
+		b.sendRecognitionErrorKeyboard(userID, transactionID, sourceMessageID)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
-		b.createPendingTxWithError(userID, transactionID, tempFile, message.MessageID, promptMessageID, extraContextMessageIDs)
-		b.sendRecognitionErrorKeyboard(userID, transactionID, message.MessageID)
+		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs)
+		b.sendRecognitionErrorKeyboard(userID, transactionID, sourceMessageID)
 		return
 	}
 
@@ -158,7 +169,7 @@ func (b *Bot) processImage(message *tgbotapi.Message, userID int, tempFile strin
 		TempImageURL:                  uploadResult,
 		TempWebDAVPath:                actualTempWebDAVPath,
 		SpecialDirectives:             parseResult.SpecialDirectives,
-		SourceImageMessageID:          message.MessageID,
+		SourceImageMessageID:          sourceMessageID,
 		ConversationContextMessageIDs: contextMessageIDs,
 		ConversationHistory:           parseHistory,
 	}

@@ -15,12 +15,13 @@ import (
 
 // Config 主配置结构
 type Config struct {
-	Telegram   TelegramConfig  `toml:"telegram"`
-	LLM        LLMConfig       `toml:"llm"`
-	Beancount  BeancountConfig `toml:"beancount"`
-	Git        GitConfig       `toml:"git"`
-	Logging    LoggingConfig   `toml:"logging"`
-	WebDAV     WebDAVConfig    `toml:"webdav"`
+	Telegram   TelegramConfig   `toml:"telegram"`
+	LLM        LLMConfig        `toml:"llm"`
+	Beancount  BeancountConfig  `toml:"beancount"`
+	Git        GitConfig        `toml:"git"`
+	Logging    LoggingConfig    `toml:"logging"`
+	WebDAV     WebDAVConfig     `toml:"webdav"`
+	HTTPServer HTTPServerConfig `toml:"http_server"`
 	projectDir string
 }
 
@@ -76,6 +77,16 @@ type WebDAVConfig struct {
 	VerifySSL        bool   `toml:"verify_ssl"`
 }
 
+// HTTPServerConfig HTTP 上传服务配置
+type HTTPServerConfig struct {
+	Enabled         bool   `toml:"enabled"`
+	ListenAddr      string `toml:"listen_addr"`
+	TargetUserID    int    `toml:"target_user_id"`
+	MaxUploadSizeMB int64  `toml:"max_upload_size_mb"`
+	ReadTimeoutSec  int    `toml:"read_timeout_sec"`
+	WriteTimeoutSec int    `toml:"write_timeout_sec"`
+}
+
 // LoadConfig 加载配置文件
 func LoadConfig(configPath string) (*Config, error) {
 	// 加载环境变量
@@ -95,6 +106,8 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to decode config file: %w", err)
 	}
 
+	config.setDefaults()
+
 	// 设置项目根目录
 	config.projectDir = filepath.Dir(configPath)
 
@@ -102,6 +115,21 @@ func LoadConfig(configPath string) (*Config, error) {
 	config.loadFromEnv()
 
 	return &config, nil
+}
+
+func (c *Config) setDefaults() {
+	if c.HTTPServer.ListenAddr == "" {
+		c.HTTPServer.ListenAddr = "127.0.0.1:8080"
+	}
+	if c.HTTPServer.MaxUploadSizeMB <= 0 {
+		c.HTTPServer.MaxUploadSizeMB = 20
+	}
+	if c.HTTPServer.ReadTimeoutSec <= 0 {
+		c.HTTPServer.ReadTimeoutSec = 15
+	}
+	if c.HTTPServer.WriteTimeoutSec <= 0 {
+		c.HTTPServer.WriteTimeoutSec = 30
+	}
 }
 
 // loadFromEnv 从环境变量加载配置
@@ -155,6 +183,15 @@ func (c *Config) Validate() []string {
 	// 验证 Git 配置
 	if c.Git.RepoURL == "" {
 		errors = append(errors, "Git 远程仓库地址未设置，请在 config.toml 中配置 git.repo_url")
+	}
+
+	if c.HTTPServer.Enabled {
+		if c.HTTPServer.TargetUserID <= 0 {
+			errors = append(errors, "HTTP 服务已启用，但 target_user_id 未设置，请在 config.toml 中配置 http_server.target_user_id")
+		}
+		if c.HTTPServer.ListenAddr == "" {
+			errors = append(errors, "HTTP 服务已启用，但 listen_addr 为空，请在 config.toml 中配置 http_server.listen_addr")
+		}
 	}
 
 	return errors

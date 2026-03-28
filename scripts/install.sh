@@ -154,6 +154,14 @@ log_file = "app.log"
 level = "info"
 max_bytes = 10485760
 backup_count = 10
+
+[http_server]
+enabled = false
+listen_addr = "127.0.0.1:8080"
+target_user_id = 0
+max_upload_size_mb = 20
+read_timeout_sec = 15
+write_timeout_sec = 30
 EOF
         print_info "默认配置文件已创建"
         print_warn "请编辑 $CONFIG_DIR/config.toml 配置您的设置"
