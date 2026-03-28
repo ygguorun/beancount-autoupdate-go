@@ -105,8 +105,6 @@ func main() {
 		cfg.Git.AutoCommit,
 		cfg.Git.CommitMessagePrefix,
 		cfg.Git.AutoPush,
-		cfg.Git.PushTimeout,
-		cfg.Git.ConflictStrategy,
 	)
 	if err != nil {
 		logger.Fatalf("初始化 Git 管理器失败: %v", err)

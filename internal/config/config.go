@@ -56,8 +56,6 @@ type GitConfig struct {
 	AutoCommit          bool   `toml:"auto_commit"`
 	CommitMessagePrefix string `toml:"commit_message_prefix"`
 	AutoPush            bool   `toml:"auto_push"`
-	PushTimeout         int    `toml:"push_timeout"`
-	ConflictStrategy    string `toml:"conflict_strategy"`
 }
 
 // LoggingConfig 日志配置

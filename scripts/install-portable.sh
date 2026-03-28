@@ -142,8 +142,6 @@ repo_url = ""
 auto_commit = true
 auto_push = true
 commit_message_prefix = "Update"
-push_timeout = 60
-conflict_strategy = "theirs"
 
 [llm]
 base_url = "https://api.openai.com/v1"

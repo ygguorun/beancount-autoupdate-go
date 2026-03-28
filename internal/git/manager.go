@@ -29,22 +29,18 @@ type Manager struct {
 	autoCommit          bool
 	commitMessagePrefix string
 	autoPush            bool
-	pushTimeout         time.Duration
-	conflictStrategy    string
 	repo                *git.Repository
 	mu                  sync.Mutex
 }
 
 // NewManager 创建 Git 管理器
-func NewManager(repoPath, repoURL string, autoCommit bool, commitMessagePrefix string, autoPush bool, pushTimeout int, conflictStrategy string) (*Manager, error) {
+func NewManager(repoPath, repoURL string, autoCommit bool, commitMessagePrefix string, autoPush bool) (*Manager, error) {
 	m := &Manager{
 		repoPath:            repoPath,
 		repoURL:             repoURL,
 		autoCommit:          autoCommit,
 		commitMessagePrefix: commitMessagePrefix,
 		autoPush:            autoPush,
-		pushTimeout:         time.Duration(pushTimeout) * time.Second,
-		conflictStrategy:    conflictStrategy,
 	}
 
 	if err := m.initRepo(); err != nil {

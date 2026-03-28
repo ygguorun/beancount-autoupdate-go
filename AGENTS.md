@@ -40,8 +40,13 @@ Use these from repository root (`/Users/rain/Desktop/code/beancount-autoupdate/g
 
 ### Current repository reality
 
-- There are currently no `*_test.go` files in this repo.
-- If you add tests, prefer package-local tests under corresponding `internal/<pkg>/` directories.
+- There are baseline unit tests under `internal/beancount`, `internal/config`, and `internal/llm`.
+- Add new tests package-locally under corresponding `internal/<pkg>/` directories.
+
+### CI checks
+
+- GitHub Actions CI runs on pull requests and `main` pushes.
+- CI currently validates formatting (`gofmt`) and runs `go test -v ./...`.
 
 ### Additional dev commands in Makefile
 

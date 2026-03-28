@@ -74,10 +74,6 @@ commit_message_prefix = "Add transaction:"
 
 # 推送配置
 auto_push = true
-push_timeout = 30
-
-# 冲突处理策略：abort, ours, theirs
-conflict_strategy = "abort"
 
 [logging]
 # 日志配置
