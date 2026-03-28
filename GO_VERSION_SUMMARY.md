@@ -1,5 +1,7 @@
 # Beancount AutoUpdate - Go 版本总结
 
+> 注：本文档为阶段性总结，当前实现请以 `README.md`、`AGENTS.md` 和代码为准。
+
 ## 项目概述
 
 已成功将 Python 版本的 Beancount AutoUpdate 项目用 Go 重写，充分利用 Go 的协程机制实现高性能并发处理。
@@ -20,6 +22,8 @@ go/
 │   │   └── manager.go
 │   ├── git/                 # Git 管理器
 │   │   └── manager.go
+│   ├── httpingest/          # HTTP 上传入口
+│   │   └── server.go
 │   ├── webdav/              # WebDAV 管理器
 │   │   └── manager.go
 │   ├── llm/                 # LLM 解析器
@@ -27,7 +31,11 @@ go/
 │   │   └── template/
 │   │       └── receipt_image_recognition.txt
 │   └── telegram/            # Telegram Bot
-│       └── bot.go
+│       ├── bot.go
+│       ├── router.go
+│       ├── command_handlers.go
+│       ├── transaction_handlers.go
+│       └── ...
 ├── build/                   # 构建输出目录
 ├── dist/                    # 多平台构建输出目录
 ├── go.mod                   # Go 模块文件
@@ -61,7 +69,6 @@ go/
 
 ### 4. Git 管理器 (git)
 - 自动提交和推送
-- 支持冲突处理策略
 - 远程仓库管理
 
 ### 5. WebDAV 管理器 (webdav)
@@ -77,9 +84,14 @@ go/
 
 ### 7. Telegram Bot (telegram)
 - 接收账单截图
-- 交互式确认和修改界面
+- 交互式确认和引导重试
 - 命令处理
 - 使用 worker pool 实现并发处理
+
+### 8. HTTP 上传入口 (httpingest)
+- 支持 `POST /v1/receipts` 上传图片
+- 接入与 Telegram 图片相同的识别/预览流程
+- 支持健康检查 `GET /healthz`
 
 ## 并发优化亮点
 
@@ -186,10 +198,10 @@ make docker-run
 
 ## 技术栈
 
-- **语言**: Go 1.23
+- **语言**: Go 1.24
 - **Telegram Bot**: go-telegram-bot-api/v5
 - **Git 操作**: go-git/v5
-- **WebDAV**: gowebdav
+- **WebDAV**: 自定义 `net/http` 实现
 - **配置**: TOML
 - **日志**: logrus + lumberjack
 - **容器化**: Docker + Alpine

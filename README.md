@@ -22,6 +22,7 @@ go/
 │   ├── beancount/
 │   ├── config/
 │   ├── git/
+│   ├── httpingest/
 │   ├── llm/
 │   ├── logger/
 │   ├── telegram/

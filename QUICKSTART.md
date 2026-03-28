@@ -1,16 +1,12 @@
 # Beancount AutoUpdate - Go 版本快速启动指南
 
-## ✅ 构建成功！
-
-项目已成功构建，生成了可执行文件：`build/beancount-autoupdate` (13MB)
+## ✅ 快速启动
 
 ## 🚀 快速开始
 
 ### 1. 配置环境
 
 ```bash
-cd go
-
 # 复制配置文件
 cp config.toml.example config.toml
 cp .env.example .env
@@ -23,7 +19,7 @@ cp .env.example .env
 **config.toml**:
 ```toml
 [telegram]
-token = "your_telegram_bot_token"
+token = ""  # 建议通过 .env 的 TELEGRAM_BOT_TOKEN 覆盖
 
 [llm]
 base_url = "https://open.bigmodel.cn/api/paas/v4"
@@ -37,6 +33,11 @@ repo_url = "git@github.com:username/beancount-data.git"
 enabled = true
 url = "https://your-webdav-server.com/dav"
 path = "Baidu/beancount/receipts"
+
+[http_server]
+enabled = false
+listen_addr = "127.0.0.1:8080"
+target_user_id = 123456789
 ```
 
 **.env**:
@@ -63,6 +64,16 @@ make run
 2. 发送 `/start` 命令
 3. 发送账单截图
 4. 查看识别结果并确认
+5. 确认后会收到脱敏回执（不返回完整分录明细）
+
+### 5. 可选：通过 HTTP 上传图片
+
+开启 `config.toml` 的 `[http_server]` 后可调用：
+
+```bash
+curl -X POST "http://127.0.0.1:8080/v1/receipts" \
+  -F "file=@/path/to/receipt.jpg"
+```
 
 ## 📦 部署选项
 
@@ -147,6 +158,7 @@ make help         # 查看所有命令
 3. LLM API 需要有足够的配额
 4. Telegram Bot Token 需要保密
 5. 建议使用 HTTPS 连接 WebDAV 服务器
+6. 若启用 HTTP 上传并对外暴露，建议通过 NGINX + Cloudflare Access 保护入口
 
 ## 🐛 故障排查
 
