@@ -44,6 +44,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 	if len(data.SpecialDirectives) > 0 {
 		builder.WriteString("📋 特殊指令预览\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		fmt.Fprintf(&builder, "交易ID: #%s\n", shortTransactionID(transactionID))
 		fmt.Fprintf(&builder, "日期: %s\n", data.Date)
 		fmt.Fprintf(&builder, "时间: %s\n", data.Time)
 		fmt.Fprintf(&builder, "描述: %s\n", data.Narration)
@@ -51,6 +52,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		for i, directive := range data.SpecialDirectives {
 			fmt.Fprintf(&builder, "  %d. %s\n", i+1, directive)
 		}
+		builder.WriteString("\n💬 可直接回复本消息输入修改意见\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(
@@ -66,6 +68,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 	} else {
 		builder.WriteString("📋 交易预览\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+		fmt.Fprintf(&builder, "交易ID: #%s\n", shortTransactionID(transactionID))
 		fmt.Fprintf(&builder, "日期: %s\n", data.Date)
 		fmt.Fprintf(&builder, "时间: %s\n", data.Time)
 		fmt.Fprintf(&builder, "标志: %s\n", data.Flag)
@@ -102,6 +105,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 			}
 			fmt.Fprintf(&builder, "  %d. %s: %s %s\n", i+1, posting.Account, amount, currency)
 		}
+		builder.WriteString("\n💬 可直接回复本消息输入修改意见\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 		keyboard = tgbotapi.NewInlineKeyboardMarkup(

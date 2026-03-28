@@ -54,6 +54,7 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 - 支持同时处理多张图片
 - 使用 /pending 查看待处理的交易列表
 - 每个交易独立管理，不会互相影响
+- 多笔待处理时，可用 #短ID 指定要修改的交易
 
 📝 记账规则
 - 支出：从资产账户到支出账户
@@ -188,13 +189,14 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 			fmt.Fprintf(&builder, "   金额: %.2f CNY\n", totalAmount)
 		}
 
-		fmt.Fprintf(&builder, "   ID: %s\n", transactionID)
+		fmt.Fprintf(&builder, "   短ID: #%s\n", strings.ToUpper(shortTransactionID(transactionID)))
 		builder.WriteString("\n")
 		i++
 	}
 
 	builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-	fmt.Fprintf(&builder, "共 %d 个待处理交易", len(txMap))
+	fmt.Fprintf(&builder, "共 %d 个待处理交易\n", len(txMap))
+	builder.WriteString("💡 可直接回复预览消息输入修改意见，或使用：#短ID 修改内容")
 
 	b.sendReply(message, builder.String())
 }

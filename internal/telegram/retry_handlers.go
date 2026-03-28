@@ -3,6 +3,8 @@ package telegram
 import (
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
 	"beancount-autoupdate/internal/beancount"
@@ -14,46 +16,243 @@ import (
 // handleTextInput 处理文本输入
 func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 	userID := int(message.From.ID)
-	text := message.Text
+	text := strings.TrimSpace(message.Text)
+	if text == "" {
+		return
+	}
 
 	logger.Infof("收到文本输入: userID=%d, text=%s", userID, text)
 
+	if transactionID, inputType, ok := b.resolveWaitingInputTarget(userID, message.ReplyToMessage); ok {
+		b.trackUserMessage(userID, transactionID, message.MessageID)
+		logger.Infof("用户 %d 在等待输入: transactionID=%s, inputType=%s", userID, transactionID, inputType)
+
+		switch inputType {
+		case "guidance":
+			b.handleGuidanceInput(userID, transactionID, text)
+		}
+
+		b.mu.Lock()
+		delete(b.waitingForInput[userID], transactionID)
+		if len(b.waitingForInput[userID]) == 0 {
+			delete(b.waitingForInput, userID)
+		}
+		b.mu.Unlock()
+		return
+	}
+
+	transactionID, guidance, reply := b.resolveGuidanceTarget(userID, text, message.ReplyToMessage)
+	if reply != "" {
+		b.sendReply(message, reply)
+		return
+	}
+
+	b.trackUserMessage(userID, transactionID, message.MessageID)
+	b.sendReply(message, fmt.Sprintf("🔄 已应用到交易 #%s，正在根据您的引导重新识别...", shortTransactionID(transactionID)))
+	b.handleGuidanceInput(userID, transactionID, guidance)
+}
+
+func (b *Bot) resolveWaitingInputTarget(userID int, replyTo *tgbotapi.Message) (string, string, bool) {
 	b.mu.RLock()
-	var transactionID string
-	var inputType string
-	// 查找用户是否有等待输入的交易
-	if txMap, ok := b.waitingForInput[userID]; ok && len(txMap) > 0 {
-		// 获取第一个（最新的）交易ID
-		for tid, itype := range txMap {
-			transactionID = tid
-			inputType = itype
-			break
+	defer b.mu.RUnlock()
+
+	waitingMap, ok := b.waitingForInput[userID]
+	if !ok || len(waitingMap) == 0 {
+		return "", "", false
+	}
+
+	if replyTo != nil {
+		if transactionID, found := b.findPendingTransactionByMessageIDLocked(userID, replyTo.MessageID); found {
+			if inputType, exists := waitingMap[transactionID]; exists {
+				return transactionID, inputType, true
+			}
+		}
+	}
+
+	for transactionID, inputType := range waitingMap {
+		return transactionID, inputType, true
+	}
+
+	return "", "", false
+}
+
+func (b *Bot) resolveGuidanceTarget(userID int, rawText string, replyTo *tgbotapi.Message) (string, string, string) {
+	if replyTo != nil {
+		b.mu.RLock()
+		transactionID, found := b.findPendingTransactionByMessageIDLocked(userID, replyTo.MessageID)
+		b.mu.RUnlock()
+		if found {
+			return transactionID, rawText, ""
+		}
+	}
+
+	if shortID, guidance, hasShortID := parseGuidanceWithShortID(rawText); hasShortID {
+		if guidance == "" {
+			return "", "", fmt.Sprintf("⚠️ 请在 #%s 后输入修改意见，例如：#%s 金额应为 35.00", strings.ToUpper(shortID), strings.ToUpper(shortID))
+		}
+
+		b.mu.RLock()
+		transactionID, found, ambiguous := b.findPendingTransactionByShortIDLocked(userID, shortID)
+		b.mu.RUnlock()
+
+		if ambiguous {
+			return "", "", "⚠️ 该短ID匹配到多笔交易，请直接回复目标预览消息进行修改"
+		}
+		if !found {
+			return "", "", fmt.Sprintf("❌ 未找到交易 #%s，请使用 /pending 查看待处理交易", strings.ToUpper(shortID))
+		}
+
+		return transactionID, guidance, ""
+	}
+
+	b.mu.RLock()
+	txMap := b.pendingTx[userID]
+	count := len(txMap)
+	if count == 1 {
+		for transactionID := range txMap {
+			b.mu.RUnlock()
+			return transactionID, rawText, ""
 		}
 	}
 	b.mu.RUnlock()
 
-	if transactionID == "" {
-		logger.Infof("用户 %d 不在等待输入状态", userID)
-		b.sendReply(message, "💡 请先发送账单图片开始识别，或使用 /help 查看用法")
-		return
+	if count == 0 {
+		return "", "", "💡 请先发送账单图片开始识别，或使用 /help 查看用法"
 	}
 
-	// 追踪用户输入的消息ID，用于后续删除
-	b.trackUserMessage(userID, transactionID, message.MessageID)
+	return "", "", b.buildAmbiguousTargetHint(userID)
+}
 
-	logger.Infof("用户 %d 在等待输入: transactionID=%s, inputType=%s", userID, transactionID, inputType)
-
-	switch inputType {
-	case "guidance":
-		b.handleGuidanceInput(userID, transactionID, text)
+func parseGuidanceWithShortID(text string) (string, string, bool) {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "#") {
+		return "", "", false
 	}
 
-	b.mu.Lock()
-	delete(b.waitingForInput[userID], transactionID)
-	if len(b.waitingForInput[userID]) == 0 {
-		delete(b.waitingForInput, userID)
+	trimmed = strings.TrimPrefix(trimmed, "#")
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return "", "", true
 	}
-	b.mu.Unlock()
+
+	shortID := parts[0]
+	if len(parts) == 1 {
+		return shortID, "", true
+	}
+
+	guidance := strings.TrimSpace(strings.Join(parts[1:], " "))
+	return shortID, guidance, true
+}
+
+func (b *Bot) findPendingTransactionByMessageIDLocked(userID int, messageID int) (string, bool) {
+	if messageID <= 0 {
+		return "", false
+	}
+
+	txMap, ok := b.pendingTx[userID]
+	if !ok || len(txMap) == 0 {
+		return "", false
+	}
+
+	for transactionID, data := range txMap {
+		if data == nil {
+			continue
+		}
+
+		if data.LastMessageID == messageID || data.OriginalMessageID == messageID || data.SourceImageMessageID == messageID {
+			return transactionID, true
+		}
+
+		for _, id := range data.PreviousMessageIDs {
+			if id == messageID {
+				return transactionID, true
+			}
+		}
+
+		for _, id := range data.ConversationContextMessageIDs {
+			if id == messageID {
+				return transactionID, true
+			}
+		}
+	}
+
+	return "", false
+}
+
+func (b *Bot) findPendingTransactionByShortIDLocked(userID int, shortID string) (string, bool, bool) {
+	txMap, ok := b.pendingTx[userID]
+	if !ok || len(txMap) == 0 {
+		return "", false, false
+	}
+
+	normalized := strings.ToUpper(strings.TrimSpace(shortID))
+	if normalized == "" {
+		return "", false, false
+	}
+
+	matched := make([]string, 0, 2)
+	for transactionID := range txMap {
+		if strings.EqualFold(shortTransactionID(transactionID), normalized) {
+			matched = append(matched, transactionID)
+		}
+	}
+
+	if len(matched) == 0 {
+		return "", false, false
+	}
+	if len(matched) > 1 {
+		return "", false, true
+	}
+
+	return matched[0], true, false
+}
+
+func (b *Bot) buildAmbiguousTargetHint(userID int) string {
+	b.mu.RLock()
+	txMap := b.pendingTx[userID]
+	items := make([]pendingHintItem, 0, len(txMap))
+	for transactionID, data := range txMap {
+		if data == nil {
+			continue
+		}
+		items = append(items, pendingHintItem{
+			shortID: shortTransactionID(transactionID),
+			date:    data.Date,
+			time:    data.Time,
+			payee:   maskPayee(data.Payee),
+		})
+	}
+	b.mu.RUnlock()
+
+	sort.Slice(items, func(i, j int) bool {
+		left := items[i].date + " " + items[i].time
+		right := items[j].date + " " + items[j].time
+		if left == right {
+			return items[i].shortID < items[j].shortID
+		}
+		return left > right
+	})
+
+	var builder strings.Builder
+	builder.WriteString("⚠️ 你有多笔待处理交易，请使用 #短ID 指定目标。\n")
+	builder.WriteString("例如：#ABC123 金额应为 35.00\n\n")
+	builder.WriteString("当前待处理：\n")
+
+	for i, item := range items {
+		if i >= 5 {
+			break
+		}
+		fmt.Fprintf(&builder, "- #%s %s %s %s\n", strings.ToUpper(item.shortID), item.date, item.time, item.payee)
+	}
+
+	return strings.TrimSpace(builder.String())
+}
+
+type pendingHintItem struct {
+	shortID string
+	date    string
+	time    string
+	payee   string
 }
 
 // rerunRecognition 重新识别图片
