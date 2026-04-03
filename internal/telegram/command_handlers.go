@@ -22,6 +22,7 @@ func (b *Bot) handleStartCommand(message *tgbotapi.Message) {
 /accounts - 查看所有账户和分类
 /pending - 查看待处理的交易列表
 /cancel - 取消当前输入
+/analyze - 查看报表分析
 
 💡 使用流程：
 1. 发送账单截图或图片文件（可连续发送多张）
@@ -30,6 +31,7 @@ func (b *Bot) handleStartCommand(message *tgbotapi.Message) {
 4. 确认后自动记账并同步到 Git
 
 📌 提示：使用 /pending 查看所有待处理的交易
+📊 报表示例：发送“本月账单分析”或使用 /analyze 损益表
 `
 	b.sendReply(message, welcomeMessage)
 }
@@ -55,6 +57,11 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 - 使用 /pending 查看待处理的交易列表
 - 每个交易独立管理，不会互相影响
 - 多笔待处理时，可用 #短ID 指定要修改的交易
+
+📊 报表分析
+- 支持 /analyze 本月账单分析
+- 支持自然语言：本月账单分析、损益表、支出排行
+- 若配置中未启用 [analysis].enabled，将返回提示
 
 📝 记账规则
 - 支出：从资产账户到支出账户

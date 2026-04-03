@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"beancount-autoupdate/internal/analysis"
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/config"
 	"beancount-autoupdate/internal/embed"
@@ -137,6 +139,37 @@ func main() {
 		cfg.LLM.MaxImageSize,
 	)
 
+	// 初始化分析服务（如果启用）
+	var analysisSvc *analysis.Service
+	if cfg.Analysis.Enabled {
+		logger.Info("初始化账单分析服务...")
+		analysisModel := cfg.Analysis.LLMModel
+		if analysisModel == "" {
+			analysisModel = cfg.LLM.Model
+		}
+		ledgerFile := cfg.Analysis.LedgerFile
+		if ledgerFile == "" {
+			ledgerFile = filepath.Join(cfg.GetAbsPath(cfg.Beancount.DataDir), "main.bean")
+		} else {
+			ledgerFile = cfg.GetAbsPath(ledgerFile)
+		}
+
+		analysisSvc = analysis.NewService(analysis.Options{
+			Enabled:        true,
+			BeanQueryBin:   cfg.Analysis.BeanQueryBin,
+			BeanReportBin:  cfg.Analysis.BeanReportBin,
+			LedgerFile:     ledgerFile,
+			Timeout:        time.Duration(cfg.Analysis.TimeoutSec) * time.Second,
+			MaxOutputLines: cfg.Analysis.MaxOutputLines,
+			Summarizer: analysis.NewOpenAISummarizer(analysis.OpenAIOptions{
+				BaseURL: cfg.LLM.BaseURL,
+				APIKey:  cfg.LLM.APIKey,
+				Model:   analysisModel,
+				Timeout: time.Duration(cfg.Analysis.TimeoutSec) * time.Second,
+			}),
+		})
+	}
+
 	// 初始化 WebDAV 管理器（如果启用）
 	var webdavMgr *webdav.Manager
 	if cfg.WebDAV.Enabled {
@@ -168,6 +201,7 @@ func main() {
 		llmParser,
 		gitMgr,
 		webdavMgr,
+		analysisSvc,
 	)
 	if err != nil {
 		logger.Fatalf("初始化 Telegram Bot 失败: %v", err)

@@ -95,3 +95,21 @@ target_user_id = 0  # 启用时必填，上传图片将投递到该 Telegram 用
 max_upload_size_mb = 20
 read_timeout_sec = 15
 write_timeout_sec = 30
+
+[analysis]
+# 报表分析（可选）
+enabled = false
+
+# bean 命令路径（可填写绝对路径）
+bean_query_bin = "bean-query"
+bean_report_bin = "bean-report"
+
+# 账本入口文件；留空时默认使用 beancount.data_dir/main.bean
+ledger_file = ""
+
+# 分析超时与输出裁剪
+timeout_sec = 30
+max_output_lines = 120
+
+# 可选：用于分析总结的模型，留空则复用 [llm].model
+llm_model = ""

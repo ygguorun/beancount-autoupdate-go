@@ -22,6 +22,7 @@ type Config struct {
 	Logging    LoggingConfig    `toml:"logging"`
 	WebDAV     WebDAVConfig     `toml:"webdav"`
 	HTTPServer HTTPServerConfig `toml:"http_server"`
+	Analysis   AnalysisConfig   `toml:"analysis"`
 	projectDir string
 }
 
@@ -87,6 +88,17 @@ type HTTPServerConfig struct {
 	WriteTimeoutSec int    `toml:"write_timeout_sec"`
 }
 
+// AnalysisConfig 报表分析配置
+type AnalysisConfig struct {
+	Enabled        bool   `toml:"enabled"`
+	BeanQueryBin   string `toml:"bean_query_bin"`
+	BeanReportBin  string `toml:"bean_report_bin"`
+	LedgerFile     string `toml:"ledger_file"`
+	TimeoutSec     int    `toml:"timeout_sec"`
+	MaxOutputLines int    `toml:"max_output_lines"`
+	LLMModel       string `toml:"llm_model"`
+}
+
 // LoadConfig 加载配置文件
 func LoadConfig(configPath string) (*Config, error) {
 	// 加载环境变量
@@ -129,6 +141,18 @@ func (c *Config) setDefaults() {
 	}
 	if c.HTTPServer.WriteTimeoutSec <= 0 {
 		c.HTTPServer.WriteTimeoutSec = 30
+	}
+	if c.Analysis.BeanQueryBin == "" {
+		c.Analysis.BeanQueryBin = "bean-query"
+	}
+	if c.Analysis.BeanReportBin == "" {
+		c.Analysis.BeanReportBin = "bean-report"
+	}
+	if c.Analysis.TimeoutSec <= 0 {
+		c.Analysis.TimeoutSec = 30
+	}
+	if c.Analysis.MaxOutputLines <= 0 {
+		c.Analysis.MaxOutputLines = 120
 	}
 }
 
@@ -191,6 +215,15 @@ func (c *Config) Validate() []string {
 		}
 		if c.HTTPServer.ListenAddr == "" {
 			errors = append(errors, "HTTP 服务已启用，但 listen_addr 为空，请在 config.toml 中配置 http_server.listen_addr")
+		}
+	}
+
+	if c.Analysis.Enabled {
+		if c.Analysis.BeanQueryBin == "" {
+			errors = append(errors, "分析功能已启用，但 bean_query_bin 为空，请在 config.toml 中配置 analysis.bean_query_bin")
+		}
+		if c.Analysis.BeanReportBin == "" {
+			errors = append(errors, "分析功能已启用，但 bean_report_bin 为空，请在 config.toml 中配置 analysis.bean_report_bin")
 		}
 	}
 

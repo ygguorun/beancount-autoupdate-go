@@ -11,6 +11,7 @@
 - ☁️ **WebDAV 上传** - 识别图片可上传至 WebDAV 并在确认后重命名
 - 🔒 **隐私友好回执** - 提交成功后返回脱敏提示（不回传完整分录明细）
 - 🌐 **HTTP 上传入口** - 可通过 API 上传图片并接入同一条 Bot 识别流程
+- 📈 **账单报表分析** - 支持固定 skill 调用 `bean-*` 命令并结合 LLM 输出中文结论
 
 ## 项目结构
 
@@ -77,6 +78,7 @@ make build
 - `/accounts` 查看账户与分类
 - `/pending` 查看待处理交易
 - `/cancel` 取消当前输入流程
+- `/analyze` 运行报表分析（如 `/analyze 本月账单分析`）
 
 ### 典型流程
 
@@ -130,6 +132,14 @@ curl -X POST "http://127.0.0.1:8080/v1/receipts" \
 
 - `allowed_user_ids`：允许使用 Bot 的用户 ID 列表
 - `delete_user_message`：确认后是否删除用户发送的原始图片消息
+
+`[analysis]` 关键项：
+
+- `enabled`：是否启用报表分析
+- `bean_query_bin` / `bean_report_bin`：`bean-*` 命令路径
+- `ledger_file`：账本入口文件（默认 `beancount/main.bean`）
+- `timeout_sec`：命令执行和 LLM 总结超时（秒）
+- `max_output_lines`：每个报表输出最大保留行数
 
 ## 开发命令
 

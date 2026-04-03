@@ -41,6 +41,10 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 		return
 	}
 
+	if b.tryHandleAnalysisText(message, text) {
+		return
+	}
+
 	transactionID, guidance, reply := b.resolveGuidanceTarget(userID, text, message.ReplyToMessage)
 	if reply != "" {
 		b.sendReply(message, reply)

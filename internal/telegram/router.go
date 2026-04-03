@@ -104,6 +104,8 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 		b.handleCancelCommand(message)
 	case "pending":
 		b.handlePendingCommand(message)
+	case "analyze":
+		b.handleAnalyzeCommand(message)
 	default:
 		b.sendReply(message, "未知命令，请使用 /help 查看可用命令")
 	}
