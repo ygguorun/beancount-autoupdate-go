@@ -14,6 +14,7 @@ func TestParseResponse(t *testing.T) {
 		input     string
 		wantErr   bool
 		wantPayee string
+		wantExtra map[string]string
 	}{
 		{
 			name: "plain json",
@@ -25,11 +26,29 @@ func TestParseResponse(t *testing.T) {
 				"tags":[],
 				"postings":[{"account":"Expenses:Food","amount":"18.00","currency":"CNY"}],
 				"order_id":"",
-				"extra":{},
+				"extra":{"discount":"2.00","original_amount":"20.00"},
 				"special_directives":[]
 			}`,
 			wantErr:   false,
 			wantPayee: "Coffee Shop",
+			wantExtra: map[string]string{"discount": "2.00", "original_amount": "20.00"},
+		},
+		{
+			name: "extra kv array",
+			input: `{
+				"datetime":"2026-03-01 12:31:00",
+				"flag":"*",
+				"payee":"Takeout",
+				"narration":"Lunch",
+				"tags":[],
+				"postings":[{"account":"Expenses:Food","amount":"16.00","currency":"CNY"}],
+				"order_id":"abc",
+				"extra":[{"k":"sub_merchant","v":"Foo"},{"k":"payment_method","v":"花呗"}],
+				"special_directives":[]
+			}`,
+			wantErr:   false,
+			wantPayee: "Takeout",
+			wantExtra: map[string]string{"sub_merchant": "Foo", "payment_method": "花呗"},
 		},
 		{
 			name: "json markdown block",
@@ -46,6 +65,7 @@ func TestParseResponse(t *testing.T) {
 			}` + "\n```",
 			wantErr:   false,
 			wantPayee: "Bakery",
+			wantExtra: map[string]string{},
 		},
 		{
 			name: "generic markdown block",
@@ -62,6 +82,22 @@ func TestParseResponse(t *testing.T) {
 			}` + "\n```",
 			wantErr:   false,
 			wantPayee: "Metro",
+			wantExtra: map[string]string{},
+		},
+		{
+			name: "invalid extra format",
+			input: `{
+				"datetime":"2026-03-01 09:00:00",
+				"flag":"*",
+				"payee":"Metro",
+				"narration":"Commute",
+				"tags":[],
+				"postings":[{"account":"Expenses:Transport","amount":"4.00","currency":"CNY"}],
+				"order_id":"",
+				"extra":"bad-format",
+				"special_directives":[]
+			}`,
+			wantErr: true,
 		},
 		{
 			name:    "empty object",
@@ -94,7 +130,68 @@ func TestParseResponse(t *testing.T) {
 			if got.Payee != tc.wantPayee {
 				t.Fatalf("unexpected payee: got %q want %q", got.Payee, tc.wantPayee)
 			}
+			if len(got.Extra) != len(tc.wantExtra) {
+				t.Fatalf("unexpected extra length: got %d want %d", len(got.Extra), len(tc.wantExtra))
+			}
+			for k, wantV := range tc.wantExtra {
+				if got.Extra[k] != wantV {
+					t.Fatalf("unexpected extra[%q]: got %q want %q", k, got.Extra[k], wantV)
+				}
+			}
 		})
+	}
+}
+
+func TestGenerateTransactionSchema(t *testing.T) {
+	schema, ok := generateTransactionSchema().(map[string]interface{})
+	if !ok {
+		t.Fatalf("schema type assertion failed")
+	}
+
+	if schema["additionalProperties"] != false {
+		t.Fatalf("root additionalProperties must be false")
+	}
+
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("properties type assertion failed")
+	}
+
+	postings, ok := properties["postings"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("postings schema missing")
+	}
+	postingsItems, ok := postings["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("postings items schema missing")
+	}
+	if postingsItems["additionalProperties"] != false {
+		t.Fatalf("postings item additionalProperties must be false")
+	}
+
+	extra, ok := properties["extra"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("extra schema missing")
+	}
+	if extra["type"] != "array" {
+		t.Fatalf("extra type must be array")
+	}
+	extraItems, ok := extra["items"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("extra items schema missing")
+	}
+	if extraItems["additionalProperties"] != false {
+		t.Fatalf("extra item additionalProperties must be false")
+	}
+	extraItemProps, ok := extraItems["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("extra item properties missing")
+	}
+	if _, ok := extraItemProps["k"]; !ok {
+		t.Fatalf("extra item missing key 'k'")
+	}
+	if _, ok := extraItemProps["v"]; !ok {
+		t.Fatalf("extra item missing key 'v'")
 	}
 }
 

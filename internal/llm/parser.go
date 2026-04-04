@@ -363,9 +363,9 @@ func (p *Parser) callWithStructuredOutput(
 	logger.Infof("LLM Response (Structured Output): %s", content)
 
 	// 解析响应
-	var transactionData beancount.TransactionData
-	if err := json.Unmarshal([]byte(content), &transactionData); err != nil {
-		return nil, history, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	transactionData, err := parseTransactionDataJSON(content)
+	if err != nil {
+		return nil, history, err
 	}
 
 	// 检查是否为空对象
@@ -376,7 +376,7 @@ func (p *Parser) callWithStructuredOutput(
 	// 更新历史（保存用户提示词、图片和助手响应）
 	newHistory := p.updateHistory(history, prompt, imageBase64, content)
 
-	return &transactionData, newHistory, nil
+	return transactionData, newHistory, nil
 }
 
 // callWithJSONMode 降级方案：使用普通 JSON 模式
@@ -448,7 +448,8 @@ func (p *Parser) updateHistory(history []beancount.ConversationMessage, userProm
 // generateTransactionSchema 生成 TransactionData 的 JSON Schema
 func generateTransactionSchema() interface{} {
 	return map[string]interface{}{
-		"type": "object",
+		"type":                 "object",
+		"additionalProperties": false,
 		"properties": map[string]interface{}{
 			"datetime":  map[string]string{"type": "string"},
 			"flag":      map[string]string{"type": "string"},
@@ -461,7 +462,8 @@ func generateTransactionSchema() interface{} {
 			"postings": map[string]interface{}{
 				"type": "array",
 				"items": map[string]interface{}{
-					"type": "object",
+					"type":                 "object",
+					"additionalProperties": false,
 					"properties": map[string]interface{}{
 						"account":  map[string]string{"type": "string"},
 						"amount":   map[string]string{"type": "string"},
@@ -473,8 +475,16 @@ func generateTransactionSchema() interface{} {
 			},
 			"order_id": map[string]string{"type": "string"},
 			"extra": map[string]interface{}{
-				"type":                 "object",
-				"additionalProperties": map[string]string{"type": "string"},
+				"type": "array",
+				"items": map[string]interface{}{
+					"type":                 "object",
+					"additionalProperties": false,
+					"properties": map[string]interface{}{
+						"k": map[string]string{"type": "string"},
+						"v": map[string]string{"type": "string"},
+					},
+					"required": []string{"k", "v"},
+				},
 			},
 			"special_directives": map[string]interface{}{
 				"type":  "array",
@@ -483,6 +493,74 @@ func generateTransactionSchema() interface{} {
 		},
 		"required": []string{"datetime", "flag", "payee", "narration", "postings", "order_id", "extra", "special_directives"},
 	}
+}
+
+type transactionDataRaw struct {
+	DateTime          string                  `json:"datetime"`
+	Flag              string                  `json:"flag"`
+	Payee             string                  `json:"payee"`
+	Narration         string                  `json:"narration"`
+	Tags              []string                `json:"tags"`
+	Postings          []beancount.PostingData `json:"postings"`
+	OrderID           string                  `json:"order_id"`
+	Extra             json.RawMessage         `json:"extra"`
+	SpecialDirectives []string                `json:"special_directives"`
+}
+
+type extraKV struct {
+	K string `json:"k"`
+	V string `json:"v"`
+}
+
+func parseTransactionDataJSON(response string) (*beancount.TransactionData, error) {
+	var raw transactionDataRaw
+	if err := json.Unmarshal([]byte(response), &raw); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	}
+
+	extra, err := parseExtra(raw.Extra)
+	if err != nil {
+		return nil, err
+	}
+
+	transactionData := &beancount.TransactionData{
+		DateTime:          raw.DateTime,
+		Flag:              raw.Flag,
+		Payee:             raw.Payee,
+		Narration:         raw.Narration,
+		Tags:              raw.Tags,
+		Postings:          raw.Postings,
+		OrderID:           raw.OrderID,
+		Extra:             extra,
+		SpecialDirectives: raw.SpecialDirectives,
+	}
+
+	return transactionData, nil
+}
+
+func parseExtra(raw json.RawMessage) (map[string]string, error) {
+	extra := map[string]string{}
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" || trimmed == "null" {
+		return extra, nil
+	}
+
+	var extraList []extraKV
+	if err := json.Unmarshal(raw, &extraList); err == nil {
+		for _, item := range extraList {
+			if item.K == "" {
+				continue
+			}
+			extra[item.K] = item.V
+		}
+		return extra, nil
+	}
+
+	if err := json.Unmarshal(raw, &extra); err == nil {
+		return extra, nil
+	}
+
+	return nil, fmt.Errorf("invalid extra format: expected array of {k,v} or object")
 }
 
 // parseResponse 解析 LLM 响应
@@ -503,9 +581,9 @@ func (p *Parser) parseResponse(response string) (*beancount.TransactionData, err
 	response = strings.TrimSpace(response)
 
 	// 解析 JSON
-	var transactionData beancount.TransactionData
-	if err := json.Unmarshal([]byte(response), &transactionData); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+	transactionData, err := parseTransactionDataJSON(response)
+	if err != nil {
+		return nil, err
 	}
 
 	// 检查是否为空对象
@@ -513,7 +591,7 @@ func (p *Parser) parseResponse(response string) (*beancount.TransactionData, err
 		return nil, fmt.Errorf("no transaction data found")
 	}
 
-	return &transactionData, nil
+	return transactionData, nil
 }
 
 // ParseTime 解析日期时间字符串
