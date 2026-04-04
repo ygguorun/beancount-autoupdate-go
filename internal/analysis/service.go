@@ -6,14 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
+	"beancount-autoupdate/internal/embed"
 	"beancount-autoupdate/internal/logger"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
 )
 
 var (
 	ErrDisabled          = errors.New("analysis feature is disabled")
+	ErrAgentDisabled     = errors.New("analysis agent is disabled")
 	ErrUnsupportedIntent = errors.New("unsupported analysis intent")
 )
 
@@ -43,14 +50,22 @@ type Section struct {
 
 // Options 服务初始化参数。
 type Options struct {
-	Enabled        bool
-	BeanQueryBin   string
-	BeanReportBin  string
-	LedgerFile     string
-	Timeout        time.Duration
-	MaxOutputLines int
-	Runner         CommandRunner
-	Summarizer     Summarizer
+	Enabled          bool
+	BeanQueryBin     string
+	LedgerFile       string
+	Timeout          time.Duration
+	MaxOutputLines   int
+	Runner           CommandRunner
+	Summarizer       Summarizer
+	AgentEnabled     bool
+	LLMBaseURL       string
+	LLMAPIKey        string
+	LLMModel         string
+	SessionTTL       time.Duration
+	MaxHistoryTurns  int
+	MaxToolCalls     int
+	PythonVenvPath   string
+	PythonScriptPath string
 }
 
 // Summarizer 使用 LLM 生成文字总结。
@@ -77,23 +92,31 @@ func (r *execRunner) Run(ctx context.Context, name string, args ...string) (stri
 
 // Service 报表分析服务。
 type Service struct {
-	enabled        bool
-	beanQueryBin   string
-	beanReportBin  string
-	ledgerFile     string
-	timeout        time.Duration
-	maxOutputLines int
-	runner         CommandRunner
-	summarizer     Summarizer
+	enabled          bool
+	beanQueryBin     string
+	ledgerFile       string
+	timeout          time.Duration
+	maxOutputLines   int
+	runner           CommandRunner
+	summarizer       Summarizer
+	agentEnabled     bool
+	agentClient      openai.Client
+	agentModel       string
+	agentPrompt      string
+	beanCheckBin     string
+	pythonVenvPath   string
+	pythonScriptPath string
+	sessionTTL       time.Duration
+	maxHistoryTurns  int
+	maxToolCalls     int
+	sessions         map[int]*analysisSession
+	sessionMu        sync.Mutex
 }
 
 // NewService 创建报表分析服务。
 func NewService(opts Options) *Service {
 	if opts.BeanQueryBin == "" {
 		opts.BeanQueryBin = "bean-query"
-	}
-	if opts.BeanReportBin == "" {
-		opts.BeanReportBin = "bean-report"
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 30 * time.Second
@@ -104,16 +127,61 @@ func NewService(opts Options) *Service {
 	if opts.Runner == nil {
 		opts.Runner = &execRunner{}
 	}
+	if opts.SessionTTL <= 0 {
+		opts.SessionTTL = 30 * time.Minute
+	}
+	if opts.MaxHistoryTurns <= 0 {
+		opts.MaxHistoryTurns = 8
+	}
+	if opts.MaxToolCalls <= 0 {
+		opts.MaxToolCalls = 4
+	}
+	if opts.PythonVenvPath == "" {
+		opts.PythonVenvPath = filepath.Join("beancount-skill-0.1.0", ".venv")
+	}
+	if opts.PythonScriptPath == "" {
+		opts.PythonScriptPath = filepath.Join("beancount-skill-0.1.0", "scripts", "analyze_beancount.py")
+	}
+
+	agentPrompt := defaultAgentPrompt
+	if prompt, err := embed.GetTemplate("analysis_agent_system_prompt.txt"); err == nil {
+		agentPrompt = strings.TrimSpace(prompt)
+	}
+
+	var agentClient openai.Client
+	agentEnabled := opts.AgentEnabled
+	if agentEnabled {
+		if strings.TrimSpace(opts.LLMAPIKey) == "" || strings.TrimSpace(opts.LLMModel) == "" {
+			logger.Warn("分析 Agent 已启用但 LLM API Key 或模型为空，自动禁用 Agent")
+			agentEnabled = false
+		} else {
+			requestOpts := []option.RequestOption{option.WithAPIKey(opts.LLMAPIKey)}
+			if strings.TrimSpace(opts.LLMBaseURL) != "" {
+				requestOpts = append(requestOpts, option.WithBaseURL(opts.LLMBaseURL))
+			}
+			agentClient = openai.NewClient(requestOpts...)
+		}
+	}
 
 	return &Service{
-		enabled:        opts.Enabled,
-		beanQueryBin:   opts.BeanQueryBin,
-		beanReportBin:  opts.BeanReportBin,
-		ledgerFile:     opts.LedgerFile,
-		timeout:        opts.Timeout,
-		maxOutputLines: opts.MaxOutputLines,
-		runner:         opts.Runner,
-		summarizer:     opts.Summarizer,
+		enabled:          opts.Enabled,
+		beanQueryBin:     opts.BeanQueryBin,
+		ledgerFile:       opts.LedgerFile,
+		timeout:          opts.Timeout,
+		maxOutputLines:   opts.MaxOutputLines,
+		runner:           opts.Runner,
+		summarizer:       opts.Summarizer,
+		agentEnabled:     agentEnabled,
+		agentClient:      agentClient,
+		agentModel:       opts.LLMModel,
+		agentPrompt:      agentPrompt,
+		beanCheckBin:     "bean-check",
+		pythonVenvPath:   opts.PythonVenvPath,
+		pythonScriptPath: opts.PythonScriptPath,
+		sessionTTL:       opts.SessionTTL,
+		maxHistoryTurns:  opts.MaxHistoryTurns,
+		maxToolCalls:     opts.MaxToolCalls,
+		sessions:         make(map[int]*analysisSession),
 	}
 }
 
@@ -240,16 +308,28 @@ func (s *Service) buildPlan(skill Skill, now time.Time) (skillPlan, error) {
 
 	begin, end := monthBounds(now)
 
+	incomeStatementQueryWithRange := fmt.Sprintf(
+		"SELECT account, sum(position) FROM OPEN ON %s CLOSE ON %s WHERE account ~ '^(Income|Expenses):' GROUP BY account ORDER BY account",
+		begin,
+		end,
+	)
+	incomeStatementQueryAll := "SELECT account, sum(position) WHERE account ~ '^(Income|Expenses):' GROUP BY account ORDER BY account"
+
 	incomeStatementCandidates := []commandSpec{
-		{name: s.beanReportBin, args: []string{"-b", begin, "-e", end, s.ledgerFile, "income_statement"}},
-		{name: s.beanReportBin, args: []string{s.ledgerFile, "income_statement", "-b", begin, "-e", end}},
-		{name: s.beanReportBin, args: []string{s.ledgerFile, "income_statement"}},
+		{name: s.beanQueryBin, args: []string{s.ledgerFile, incomeStatementQueryWithRange}},
+		{name: s.beanQueryBin, args: []string{s.ledgerFile, incomeStatementQueryAll}},
 	}
 
+	expenseQueryWithRange := fmt.Sprintf(
+		"SELECT account, sum(position) FROM OPEN ON %s CLOSE ON %s WHERE account ~ '^Expenses:' GROUP BY account ORDER BY sum(position) DESC",
+		begin,
+		end,
+	)
+	expenseQueryAll := "SELECT account, sum(position) WHERE account ~ '^Expenses:' GROUP BY account ORDER BY sum(position) DESC"
+
 	expenseCandidates := []commandSpec{
-		{name: s.beanReportBin, args: []string{"-b", begin, "-e", end, s.ledgerFile, "balances", "Expenses"}},
-		{name: s.beanReportBin, args: []string{s.ledgerFile, "balances", "Expenses"}},
-		{name: s.beanQueryBin, args: []string{s.ledgerFile, "SELECT account, sum(position) WHERE account ~ '^Expenses:' GROUP BY account ORDER BY sum(position)"}},
+		{name: s.beanQueryBin, args: []string{s.ledgerFile, expenseQueryWithRange}},
+		{name: s.beanQueryBin, args: []string{s.ledgerFile, expenseQueryAll}},
 	}
 
 	switch skill {
@@ -282,9 +362,12 @@ func (s *Service) buildPlan(skill Skill, now time.Time) (skillPlan, error) {
 
 func (s *Service) runSection(ctx context.Context, sec sectionPlan) (Section, error) {
 	var errs []string
+	logger.Debugf("分析 section 开始: title=%s candidates=%d", sec.title, len(sec.candidates))
 	for _, spec := range sec.candidates {
+		logger.Debugf("尝试执行 section 候选命令: title=%s cmd=%s", sec.title, renderCommand(spec))
 		stdout, stderr, err := s.runCommand(ctx, spec)
 		if err != nil {
+			logger.Debugf("section 候选命令失败: title=%s cmd=%s err=%v", sec.title, renderCommand(spec), err)
 			errs = append(errs, fmt.Sprintf("%s %s: %v", spec.name, strings.Join(spec.args, " "), err))
 			if strings.TrimSpace(stderr) != "" {
 				errs = append(errs, strings.TrimSpace(stderr))
@@ -316,9 +399,25 @@ func (s *Service) runCommand(ctx context.Context, spec commandSpec) (string, str
 	cmdCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 
+	cmdText := renderCommand(spec)
+	start := time.Now()
+	logger.Debugf("执行命令开始: %s", cmdText)
+
 	stdout, stderr, err := s.runner.Run(cmdCtx, spec.name, spec.args...)
+	duration := time.Since(start)
 	if cmdCtx.Err() == context.DeadlineExceeded {
+		logger.Debugf("执行命令超时: cmd=%s duration=%s", cmdText, duration)
 		return stdout, stderr, fmt.Errorf("command timeout")
+	}
+
+	if err != nil {
+		logger.Debugf("执行命令失败: cmd=%s duration=%s stdout_len=%d stderr_len=%d err=%v", cmdText, duration, len(stdout), len(stderr), err)
+		stderrPreview := previewMultilineText(stderr, 10, 1200)
+		if stderrPreview != "" {
+			logger.Debugf("执行命令失败 stderr 摘录: cmd=%s preview=%q", cmdText, stderrPreview)
+		}
+	} else {
+		logger.Debugf("执行命令成功: cmd=%s duration=%s stdout_len=%d stderr_len=%d", cmdText, duration, len(stdout), len(stderr))
 	}
 
 	return stdout, stderr, err
@@ -345,6 +444,26 @@ func trimOutputLines(raw string, maxLines int) string {
 	trimmed := lines[:maxLines]
 	trimmed = append(trimmed, fmt.Sprintf("... (已截断，原始 %d 行)", len(lines)))
 	return strings.Join(trimmed, "\n")
+}
+
+func previewMultilineText(text string, maxLines int, maxChars int) string {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return ""
+	}
+
+	if maxLines > 0 {
+		lines := strings.Split(trimmed, "\n")
+		if len(lines) > maxLines {
+			trimmed = strings.Join(lines[:maxLines], "\n") + fmt.Sprintf("\n... (%d more lines)", len(lines)-maxLines)
+		}
+	}
+
+	if maxChars > 0 && len(trimmed) > maxChars {
+		trimmed = trimmed[:maxChars] + fmt.Sprintf("... (truncated, total chars: %d)", len(text))
+	}
+
+	return trimmed
 }
 
 func buildSummaryPrompt(result *Result, userText string) string {

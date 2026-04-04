@@ -22,12 +22,26 @@ func (b *Bot) handleAnalyzeCommand(message *tgbotapi.Message) {
 		return
 	}
 
+	userID := int(message.From.ID)
 	query := strings.TrimSpace(message.CommandArguments())
-	if query == "" {
-		query = "本月账单分析"
+	logger.Debugf("收到 /analyze 命令: userID=%d query=%q", userID, query)
+	if strings.EqualFold(query, "reset") || query == "重置" {
+		b.analysisSvc.ResetSession(userID)
+		b.sendReply(message, "🧹 已重置分析会话。可继续使用 /analyze <问题> 开始新会话。")
+		return
 	}
 
-	b.runAnalysisAndReply(message.Chat.ID, int(message.From.ID), message.MessageID, query, true)
+	if query == "" {
+		helpText := "请在 /analyze 后输入分析问题，例如：\n" +
+			"- /analyze 本月餐饮支出最多的是哪些？\n" +
+			"- /analyze 最近三个月储蓄率趋势\n" +
+			"- /analyze 检查账本是否有错误\n\n" +
+			"会话中可直接继续追问；使用 /analyze reset 结束会话。"
+		b.sendReply(message, helpText)
+		return
+	}
+
+	b.runAnalysisAndReply(message.Chat.ID, userID, message.MessageID, query, true)
 }
 
 func (b *Bot) tryHandleAnalysisText(message *tgbotapi.Message, text string) bool {
@@ -40,39 +54,29 @@ func (b *Bot) tryHandleAnalysisText(message *tgbotapi.Message, text string) bool
 		return false
 	}
 
-	if _, ok := analysis.DetectSkill(text); !ok {
+	if !b.analysisSvc.IsSessionActive(userID) {
 		return false
 	}
+	logger.Debugf("分析会话追问: userID=%d text=%q", userID, text)
 
 	b.runAnalysisAndReply(message.Chat.ID, userID, message.MessageID, text, false)
 	return true
 }
 
 func (b *Bot) runAnalysisAndReply(chatID int64, userID int, replyToMessageID int, query string, fromCommand bool) {
+	logger.Debugf("开始执行分析请求: userID=%d fromCommand=%v query=%q", userID, fromCommand, query)
 	if fromCommand {
-		b.sendReplyToChat(chatID, replyToMessageID, "📊 正在生成报表，请稍候...")
+		b.sendReplyToChat(chatID, replyToMessageID, "📊 正在分析账单问题，请稍候...")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 
-	var (
-		result *analysis.Result
-		err    error
-	)
-
-	if skill, ok := analysis.ParseSkillAlias(query); ok {
-		result, err = b.analysisSvc.AnalyzeSkill(ctx, skill, query, time.Now())
-	} else {
-		result, err = b.analysisSvc.Analyze(ctx, query, time.Now())
-	}
+	result, err := b.analysisSvc.AnalyzeAgent(ctx, userID, query, time.Now())
 
 	if err != nil {
-		if errors.Is(err, analysis.ErrUnsupportedIntent) {
-			helpText := "暂不支持该分析请求。可用示例：\n" +
-				"- 本月账单分析\n" +
-				"- 损益表\n" +
-				"- 支出排行"
+		if errors.Is(err, analysis.ErrAgentDisabled) {
+			helpText := "分析 Agent 未启用或缺少 LLM 配置。请检查 [analysis].agent_enabled、LLM API Key 与模型设置。"
 			b.sendReplyToChat(chatID, replyToMessageID, helpText)
 			return
 		}
@@ -81,6 +85,8 @@ func (b *Bot) runAnalysisAndReply(chatID int64, userID int, replyToMessageID int
 		b.sendReplyToChat(chatID, replyToMessageID, fmt.Sprintf("❌ 分析失败: %v", err))
 		return
 	}
+
+	logger.Debugf("分析请求完成: userID=%d sections=%d summary_len=%d", userID, len(result.Sections), len(strings.TrimSpace(result.Summary)))
 
 	msg := formatAnalysisMessage(result)
 	b.sendLongText(chatID, replyToMessageID, msg)

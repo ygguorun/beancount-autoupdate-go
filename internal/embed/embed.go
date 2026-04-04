@@ -11,13 +11,14 @@ var templatesFS embed.FS
 
 // TemplateFiles 嵌入的模板文件
 var TemplateFiles = map[string]string{
-	"init.bean":                     "",
-	"assets.bean":                   "",
-	"equity.bean":                   "",
-	"expenses.bean":                 "",
-	"income.bean":                   "",
-	"liabilities.bean":              "",
-	"receipt_image_recognition.txt": "",
+	"init.bean":                        "",
+	"assets.bean":                      "",
+	"equity.bean":                      "",
+	"expenses.bean":                    "",
+	"income.bean":                      "",
+	"liabilities.bean":                 "",
+	"receipt_image_recognition.txt":    "",
+	"analysis_agent_system_prompt.txt": "",
 }
 
 // GetTemplate 获取模板文件内容
@@ -56,6 +57,7 @@ func InitTemplates() error {
 		"income.bean",
 		"liabilities.bean",
 		"receipt_image_recognition.txt",
+		"analysis_agent_system_prompt.txt",
 	}
 
 	for _, name := range templateNames {

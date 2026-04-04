@@ -155,12 +155,20 @@ func main() {
 		}
 
 		analysisSvc = analysis.NewService(analysis.Options{
-			Enabled:        true,
-			BeanQueryBin:   cfg.Analysis.BeanQueryBin,
-			BeanReportBin:  cfg.Analysis.BeanReportBin,
-			LedgerFile:     ledgerFile,
-			Timeout:        time.Duration(cfg.Analysis.TimeoutSec) * time.Second,
-			MaxOutputLines: cfg.Analysis.MaxOutputLines,
+			Enabled:          true,
+			BeanQueryBin:     cfg.Analysis.BeanQueryBin,
+			LedgerFile:       ledgerFile,
+			Timeout:          time.Duration(cfg.Analysis.TimeoutSec) * time.Second,
+			MaxOutputLines:   cfg.Analysis.MaxOutputLines,
+			AgentEnabled:     cfg.Analysis.AgentEnabled,
+			LLMBaseURL:       cfg.LLM.BaseURL,
+			LLMAPIKey:        cfg.LLM.APIKey,
+			LLMModel:         analysisModel,
+			SessionTTL:       time.Duration(cfg.Analysis.SessionTTLMin) * time.Minute,
+			MaxHistoryTurns:  cfg.Analysis.MaxHistoryTurns,
+			MaxToolCalls:     cfg.Analysis.MaxToolCalls,
+			PythonVenvPath:   cfg.GetAbsPath(cfg.Analysis.PythonVenvPath),
+			PythonScriptPath: cfg.GetAbsPath(cfg.Analysis.PythonScriptPath),
 			Summarizer: analysis.NewOpenAISummarizer(analysis.OpenAIOptions{
 				BaseURL: cfg.LLM.BaseURL,
 				APIKey:  cfg.LLM.APIKey,

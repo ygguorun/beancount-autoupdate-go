@@ -90,13 +90,18 @@ type HTTPServerConfig struct {
 
 // AnalysisConfig 报表分析配置
 type AnalysisConfig struct {
-	Enabled        bool   `toml:"enabled"`
-	BeanQueryBin   string `toml:"bean_query_bin"`
-	BeanReportBin  string `toml:"bean_report_bin"`
-	LedgerFile     string `toml:"ledger_file"`
-	TimeoutSec     int    `toml:"timeout_sec"`
-	MaxOutputLines int    `toml:"max_output_lines"`
-	LLMModel       string `toml:"llm_model"`
+	Enabled          bool   `toml:"enabled"`
+	BeanQueryBin     string `toml:"bean_query_bin"`
+	LedgerFile       string `toml:"ledger_file"`
+	TimeoutSec       int    `toml:"timeout_sec"`
+	MaxOutputLines   int    `toml:"max_output_lines"`
+	LLMModel         string `toml:"llm_model"`
+	AgentEnabled     bool   `toml:"agent_enabled"`
+	SessionTTLMin    int    `toml:"session_ttl_min"`
+	MaxHistoryTurns  int    `toml:"max_history_turns"`
+	MaxToolCalls     int    `toml:"max_tool_calls"`
+	PythonVenvPath   string `toml:"python_venv_path"`
+	PythonScriptPath string `toml:"python_script_path"`
 }
 
 // LoadConfig 加载配置文件
@@ -145,14 +150,26 @@ func (c *Config) setDefaults() {
 	if c.Analysis.BeanQueryBin == "" {
 		c.Analysis.BeanQueryBin = "bean-query"
 	}
-	if c.Analysis.BeanReportBin == "" {
-		c.Analysis.BeanReportBin = "bean-report"
-	}
 	if c.Analysis.TimeoutSec <= 0 {
 		c.Analysis.TimeoutSec = 30
 	}
 	if c.Analysis.MaxOutputLines <= 0 {
 		c.Analysis.MaxOutputLines = 120
+	}
+	if c.Analysis.SessionTTLMin <= 0 {
+		c.Analysis.SessionTTLMin = 30
+	}
+	if c.Analysis.MaxHistoryTurns <= 0 {
+		c.Analysis.MaxHistoryTurns = 8
+	}
+	if c.Analysis.MaxToolCalls <= 0 {
+		c.Analysis.MaxToolCalls = 4
+	}
+	if c.Analysis.PythonVenvPath == "" {
+		c.Analysis.PythonVenvPath = "beancount-skill-0.1.0/.venv"
+	}
+	if c.Analysis.PythonScriptPath == "" {
+		c.Analysis.PythonScriptPath = "beancount-skill-0.1.0/scripts/analyze_beancount.py"
 	}
 }
 
@@ -222,8 +239,13 @@ func (c *Config) Validate() []string {
 		if c.Analysis.BeanQueryBin == "" {
 			errors = append(errors, "分析功能已启用，但 bean_query_bin 为空，请在 config.toml 中配置 analysis.bean_query_bin")
 		}
-		if c.Analysis.BeanReportBin == "" {
-			errors = append(errors, "分析功能已启用，但 bean_report_bin 为空，请在 config.toml 中配置 analysis.bean_report_bin")
+		if c.Analysis.AgentEnabled {
+			if strings.TrimSpace(c.Analysis.PythonVenvPath) == "" {
+				errors = append(errors, "分析 Agent 已启用，但 python_venv_path 为空，请在 config.toml 中配置 analysis.python_venv_path")
+			}
+			if strings.TrimSpace(c.Analysis.PythonScriptPath) == "" {
+				errors = append(errors, "分析 Agent 已启用，但 python_script_path 为空，请在 config.toml 中配置 analysis.python_script_path")
+			}
 		}
 	}
 

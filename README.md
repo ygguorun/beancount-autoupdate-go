@@ -136,8 +136,10 @@ curl -X POST "http://127.0.0.1:8080/v1/receipts" \
 `[analysis]` 关键项：
 
 - `enabled`：是否启用报表分析
-- `bean_query_bin` / `bean_report_bin`：`bean-*` 命令路径
+- `agent_enabled`：是否启用对话式分析 Agent（通过 `/analyze`）
+- `bean_query_bin`：`bean-query` 命令路径
 - `ledger_file`：账本入口文件（默认 `beancount/main.bean`）
+- `python_venv_path` / `python_script_path`：快速分析脚本运行环境与路径
 - `timeout_sec`：命令执行和 LLM 总结超时（秒）
 - `max_output_lines`：每个报表输出最大保留行数
 

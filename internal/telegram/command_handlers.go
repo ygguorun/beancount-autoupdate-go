@@ -31,7 +31,7 @@ func (b *Bot) handleStartCommand(message *tgbotapi.Message) {
 4. 确认后自动记账并同步到 Git
 
 📌 提示：使用 /pending 查看所有待处理的交易
-📊 报表示例：发送“本月账单分析”或使用 /analyze 损益表
+📊 分析示例：/analyze 本月餐饮支出最多的是哪些？
 `
 	b.sendReply(message, welcomeMessage)
 }
@@ -59,9 +59,9 @@ func (b *Bot) handleHelpCommand(message *tgbotapi.Message) {
 - 多笔待处理时，可用 #短ID 指定要修改的交易
 
 📊 报表分析
-- 支持 /analyze 本月账单分析
-- 支持自然语言：本月账单分析、损益表、支出排行
-- 若配置中未启用 [analysis].enabled，将返回提示
+- 使用 /analyze <问题> 启动分析会话
+- 会话中可直接继续追问，使用 /analyze reset 重置会话
+- 若配置中未启用 [analysis].enabled 或 [analysis].agent_enabled，将返回提示
 
 📝 记账规则
 - 支出：从资产账户到支出账户

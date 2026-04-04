@@ -100,16 +100,27 @@ write_timeout_sec = 30
 # 报表分析（可选）
 enabled = false
 
+# 对话式分析 Agent（建议开启）
+agent_enabled = true
+
 # bean 命令路径（可填写绝对路径）
 bean_query_bin = "bean-query"
-bean_report_bin = "bean-report"
 
 # 账本入口文件；留空时默认使用 beancount.data_dir/main.bean
 ledger_file = ""
 
+# Python 快速分析脚本（使用 uv 管理的虚拟环境）
+python_venv_path = "beancount-skill-0.1.0/.venv"
+python_script_path = "beancount-skill-0.1.0/scripts/analyze_beancount.py"
+
 # 分析超时与输出裁剪
 timeout_sec = 30
 max_output_lines = 120
+
+# 对话会话与工具调用限制
+session_ttl_min = 30
+max_history_turns = 8
+max_tool_calls = 4
 
 # 可选：用于分析总结的模型，留空则复用 [llm].model
 llm_model = ""

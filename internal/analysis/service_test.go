@@ -62,8 +62,8 @@ func TestAnalyzeSkill(t *testing.T) {
 
 	runner := &fakeRunner{
 		outputs: map[string]string{
-			"bean-report -b " + begin + " -e " + end + " /tmp/main.bean income_statement":  "Income: 1000\nExpenses: 400\n",
-			"bean-report -b " + begin + " -e " + end + " /tmp/main.bean balances Expenses": "Expenses:Food 200\nExpenses:Transport 100\n",
+			"bean-query /tmp/main.bean SELECT account, sum(position) FROM OPEN ON " + begin + " CLOSE ON " + end + " WHERE account ~ '^(Income|Expenses):' GROUP BY account ORDER BY account":   "Income: 1000\nExpenses: 400\n",
+			"bean-query /tmp/main.bean SELECT account, sum(position) FROM OPEN ON " + begin + " CLOSE ON " + end + " WHERE account ~ '^Expenses:' GROUP BY account ORDER BY sum(position) DESC": "Expenses:Food 200\nExpenses:Transport 100\n",
 		},
 		errors: map[string]error{},
 	}
@@ -71,7 +71,6 @@ func TestAnalyzeSkill(t *testing.T) {
 	svc := NewService(Options{
 		Enabled:        true,
 		BeanQueryBin:   "bean-query",
-		BeanReportBin:  "bean-report",
 		LedgerFile:     "/tmp/main.bean",
 		Runner:         runner,
 		Summarizer:     &fakeSummarizer{},
@@ -94,6 +93,15 @@ func TestAnalyzeSkill(t *testing.T) {
 
 	if len(result.Sections) != 2 {
 		t.Fatalf("unexpected sections len: %d", len(result.Sections))
+	}
+
+	for _, section := range result.Sections {
+		if !strings.HasPrefix(section.Command, "bean-query ") {
+			t.Fatalf("unexpected command, want bean-query: %s", section.Command)
+		}
+		if strings.Contains(section.Command, "bean-report") {
+			t.Fatalf("unexpected deprecated command in section: %s", section.Command)
+		}
 	}
 }
 
