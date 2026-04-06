@@ -13,6 +13,7 @@ import (
 func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID int) {
 	logger.Infof("showTransactionPreview: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, messageID)
 
+	stateChanged := false
 	b.mu.Lock()
 	data, ok := b.pendingTx[userID][transactionID]
 	if ok {
@@ -20,9 +21,13 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		if data.OriginalMessageID == 0 && messageID > 0 {
 			data.OriginalMessageID = messageID
 		}
+		stateChanged = true
 		logger.Infof("更新消息ID: LastMessageID=%d, OriginalMessageID=%d", data.LastMessageID, data.OriginalMessageID)
 	}
 	b.mu.Unlock()
+	if stateChanged {
+		b.persistSessionState()
+	}
 
 	if !ok {
 		logger.Warnf("用户 %d 没有待确认的交易 %s（在 showTransactionPreview 中）", userID, transactionID)
@@ -145,6 +150,7 @@ func (b *Bot) sendNewTransactionPreview(userID int, transactionID string, text s
 		return
 	}
 
+	stateChanged := false
 	b.mu.Lock()
 	if d, ok := b.pendingTx[userID][transactionID]; ok {
 		if oldMessageID > 0 {
@@ -165,7 +171,11 @@ func (b *Bot) sendNewTransactionPreview(userID int, transactionID string, text s
 		if d.OriginalMessageID == 0 {
 			d.OriginalMessageID = sentMsg.MessageID
 		}
+		stateChanged = true
 		logger.Infof("发送新消息成功: transactionID=%s, LastMessageID=%d, OriginalMessageID=%d, PreviousMessageIDs=%v", transactionID, d.LastMessageID, d.OriginalMessageID, d.PreviousMessageIDs)
 	}
 	b.mu.Unlock()
+	if stateChanged {
+		b.persistSessionState()
+	}
 }

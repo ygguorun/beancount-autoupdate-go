@@ -177,6 +177,7 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 		b.pendingTx[userID][transactionID].ConversationContextMessageIDs = append(b.pendingTx[userID][transactionID].ConversationContextMessageIDs, promptMessageID)
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	logger.Infof("已存储待确认交易: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
 	logger.Infof("准备显示预览")
@@ -205,6 +206,7 @@ func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFil
 		b.pendingTx[userID][transactionID].ConversationContextMessageIDs = append(b.pendingTx[userID][transactionID].ConversationContextMessageIDs, promptMessageID)
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 }
 
 // sendRecognitionErrorKeyboard 发送识别错误的键盘
@@ -370,6 +372,7 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		logger.Warnf("交易不存在于 pendingTx 中: transactionID=%s", transactionID)
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	response := fmt.Sprintf(
 		"✅ 交易已记录\n\n🆔 交易ID: %s\n📅 日期: %s\n🏷️ 对象: %s\n\n🔒 详情已脱敏，如需核对请在账本或 Git 记录中查看",
@@ -385,10 +388,9 @@ func (b *Bot) cancelTransaction(userID int, transactionID string) {
 	logger.Infof("取消交易: userID=%d, transactionID=%s", userID, transactionID)
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
 	data, ok := b.pendingTx[userID][transactionID]
 	if !ok {
+		b.mu.Unlock()
 		logger.Warnf("用户 %d 没有待确认的交易 %s（在 cancelTransaction 中）", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
@@ -406,6 +408,8 @@ func (b *Bot) cancelTransaction(userID int, transactionID string) {
 		logger.Infof("用户 %d 没有其他待确认交易，删除用户 map", userID)
 		delete(b.pendingTx, userID)
 	}
+	b.mu.Unlock()
+	b.persistSessionState()
 
 	b.sendMessageWithNilKeyboard(userID, "❌ 交易已取消")
 }

@@ -47,13 +47,18 @@ func (b *Bot) trackUserMessage(userID int, transactionID string, messageID int) 
 	if messageID <= 0 {
 		return
 	}
+	stateChanged := false
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if txMap, ok := b.pendingTx[userID]; ok {
 		if data, ok := txMap[transactionID]; ok {
 			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
+			stateChanged = true
 			logger.Infof("追踪用户消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
 		}
+	}
+	b.mu.Unlock()
+	if stateChanged {
+		b.persistSessionState()
 	}
 }
 
@@ -62,13 +67,18 @@ func (b *Bot) trackBotMessage(userID int, transactionID string, messageID int) {
 	if messageID <= 0 {
 		return
 	}
+	stateChanged := false
 	b.mu.Lock()
-	defer b.mu.Unlock()
 	if txMap, ok := b.pendingTx[userID]; ok {
 		if data, ok := txMap[transactionID]; ok {
 			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
+			stateChanged = true
 			logger.Infof("追踪Bot消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
 		}
+	}
+	b.mu.Unlock()
+	if stateChanged {
+		b.persistSessionState()
 	}
 }
 

@@ -38,6 +38,7 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 			delete(b.waitingForInput, userID)
 		}
 		b.mu.Unlock()
+		b.persistSessionState()
 		return
 	}
 
@@ -350,6 +351,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		data.PreviousMessageIDs = []int{}
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	logger.Infof("已更新待确认交易: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
 
@@ -391,6 +393,7 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 		data.LastMessageID = messageID
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	var historyInfo string
 	b.mu.RLock()
@@ -501,6 +504,7 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 		d.ConversationHistory = newHistory
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	logger.Infof("引导重试成功: userID=%d, transactionID=%s, payee=%s, narration=%s", userID, transactionID, parseResult.Payee, parseResult.Narration)
 
@@ -519,6 +523,7 @@ func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance str
 		})
 	}
 	b.mu.Unlock()
+	b.persistSessionState()
 
 	keyboard := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(

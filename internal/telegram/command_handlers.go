@@ -122,6 +122,7 @@ func (b *Bot) handleCancelCommand(message *tgbotapi.Message) {
 			delete(b.waitingForInput, userID)
 		}
 		b.mu.Unlock()
+		b.persistSessionState()
 		logger.Infof("已取消用户 %d 的输入等待: transactionID=%s, inputType=%s", userID, transactionID, inputType)
 
 		// 检查是否有待确认的交易，如果有则返回预览页面

@@ -2,12 +2,14 @@ package telegram
 
 import (
 	"fmt"
+	"path/filepath"
 	"sync"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/config"
 	"beancount-autoupdate/internal/git"
 	"beancount-autoupdate/internal/llm"
+	"beancount-autoupdate/internal/logger"
 	"beancount-autoupdate/internal/webdav"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -24,6 +26,8 @@ type Bot struct {
 	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
 	waitingForInput map[int]map[string]string                        // userID -> transactionID -> inputType
 	mu              sync.RWMutex
+	stateMu         sync.Mutex
+	stateFilePath   string
 	llmSemaphore    chan struct{} // LLM 信号量，控制并发调用
 }
 
@@ -42,7 +46,7 @@ func NewBot(
 
 	botAPI.Debug = false
 
-	return &Bot{
+	b := &Bot{
 		config:          cfg,
 		beancountMgr:    beancountMgr,
 		llmParser:       llmParser,
@@ -51,6 +55,13 @@ func NewBot(
 		botAPI:          botAPI,
 		pendingTx:       make(map[int]map[string]*beancount.PendingTransaction),
 		waitingForInput: make(map[int]map[string]string),
+		stateFilePath:   cfg.GetAbsPath(filepath.Join("tmp", "telegram_sessions.json")),
 		llmSemaphore:    make(chan struct{}, 1), // 限制 LLM 并发为1
-	}, nil
+	}
+
+	if err := b.loadSessionState(); err != nil {
+		logger.Warnf("加载会话状态失败，将使用空状态启动: %v", err)
+	}
+
+	return b, nil
 }
