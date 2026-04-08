@@ -11,6 +11,11 @@ import (
 // Run 运行 Bot
 func (b *Bot) Run() error {
 	logger.Info("Bot is running...")
+	if err := b.registerSlashCommands(); err != nil {
+		logger.Warnf("自动注册 Telegram slash commands 失败: %v", err)
+	} else {
+		logger.Info("已自动注册 Telegram slash commands（仅私聊）")
+	}
 
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60

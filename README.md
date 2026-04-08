@@ -78,6 +78,7 @@ make build
 - `/accounts` 查看账户与分类
 - `/pending` 查看待处理交易
 - `/cancel` 取消当前输入流程
+- Bot 启动时会自动将上述命令注册到 Telegram 私聊菜单
 
 会话状态会自动保存到 `tmp/telegram_sessions.json`，进程重启后仍可继续处理 `/pending` 里的交易。
 
