@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -17,6 +18,8 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
+	"github.com/openai/openai-go/v3/shared"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/embed"
@@ -30,6 +33,14 @@ type Parser struct {
 	timeout      time.Duration
 	extendPrompt string
 	maxImageSize int
+}
+
+type protocolRequest struct {
+	chatMessages  []openai.ChatCompletionMessageParamUnion
+	responseInput responses.ResponseInputParam
+	history       []beancount.ConversationMessage
+	prompt        string
+	imageBase64   string
 }
 
 // NewParser 创建 LLM 解析器
@@ -76,6 +87,7 @@ func (p *Parser) ParseImageWithHistory(
 	// 构建消息列表
 	// userPromptOverride 作为 currentPrompt 传入，用于引导重试时添加当前用户消息
 	messages := p.buildMessages(prompt, base64Image, history, userPromptOverride)
+	responseInput := p.buildResponseInput(prompt, base64Image, history, userPromptOverride)
 
 	// 记录 LLM 输入日志
 	logger.Debugf("LLM Input: history_count=%d, has_image=%v, current_prompt_len=%d", len(history), base64Image != "", len(userPromptOverride))
@@ -104,15 +116,70 @@ func (p *Parser) ParseImageWithHistory(
 		// 引导重试时不保存图片
 	}
 
-	// 尝试使用 Structured Outputs
-	transactionData, newHistory, err := p.callWithStructuredOutput(messages, history, userPromptForHistory, imageBase64ForHistory)
+	request := protocolRequest{
+		chatMessages:  messages,
+		responseInput: responseInput,
+		history:       history,
+		prompt:        userPromptForHistory,
+		imageBase64:   imageBase64ForHistory,
+	}
+
+	transactionData, newHistory, err := p.parseWithProtocolFallback(request)
 	if err != nil {
-		logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
-		// 降级：尝试普通 JSON 模式
-		transactionData, newHistory, err = p.callWithJSONMode(messages, history, userPromptForHistory, imageBase64ForHistory)
-		if err != nil {
-			return nil, history, fmt.Errorf("failed to parse response: %w", err)
-		}
+		return nil, history, fmt.Errorf("failed to parse response: %w", err)
+	}
+
+	return transactionData, newHistory, nil
+}
+
+func (p *Parser) parseWithProtocolFallback(req protocolRequest) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	transactionData, newHistory, err := p.parseWithResponses(req)
+	if err == nil {
+		return transactionData, newHistory, nil
+	}
+
+	if !isResponsesProtocolUnsupported(err) {
+		return nil, req.history, err
+	}
+
+	logger.Warnf("Responses endpoint is unavailable, fallback to chat/completions: %v", err)
+	transactionData, newHistory, err = p.parseWithChatCompletions(req)
+	if err != nil {
+		return nil, req.history, fmt.Errorf("responses unavailable and chat/completions failed: %w", err)
+	}
+
+	return transactionData, newHistory, nil
+}
+
+func (p *Parser) parseWithResponses(req protocolRequest) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	transactionData, newHistory, err := p.callWithStructuredOutputResponses(req.responseInput, req.history, req.prompt, req.imageBase64)
+	if err == nil {
+		return transactionData, newHistory, nil
+	}
+
+	if isResponsesProtocolUnsupported(err) {
+		return nil, req.history, err
+	}
+
+	logger.Warnf("Responses Structured Outputs failed: %v, falling back to Responses JSON mode", err)
+	transactionData, newHistory, err = p.callWithJSONModeResponses(req.responseInput, req.history, req.prompt, req.imageBase64)
+	if err != nil {
+		return nil, req.history, err
+	}
+
+	return transactionData, newHistory, nil
+}
+
+func (p *Parser) parseWithChatCompletions(req protocolRequest) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	transactionData, newHistory, err := p.callWithStructuredOutput(req.chatMessages, req.history, req.prompt, req.imageBase64)
+	if err == nil {
+		return transactionData, newHistory, nil
+	}
+
+	logger.Warnf("Chat Completions Structured Outputs failed: %v, falling back to JSON mode", err)
+	transactionData, newHistory, err = p.callWithJSONMode(req.chatMessages, req.history, req.prompt, req.imageBase64)
+	if err != nil {
+		return nil, req.history, err
 	}
 
 	return transactionData, newHistory, nil
@@ -323,6 +390,146 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 	return messages
 }
 
+func (p *Parser) buildResponseInput(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) responses.ResponseInputParam {
+	input := responses.ResponseInputParam{}
+
+	if len(history) == 0 {
+		input = append(input, buildResponsesUserMessage(prompt, base64Image))
+		return input
+	}
+
+	for _, msg := range history {
+		switch msg.Role {
+		case "user":
+			input = append(input, buildResponsesUserMessage(msg.Content, msg.ImageBase64))
+		case "assistant":
+			input = append(input, responses.ResponseInputItemParamOfMessage(msg.Content, responses.EasyInputMessageRoleAssistant))
+		}
+	}
+
+	if currentPrompt != "" {
+		input = append(input, responses.ResponseInputItemParamOfMessage(currentPrompt, responses.EasyInputMessageRoleUser))
+	}
+
+	return input
+}
+
+func buildResponsesUserMessage(content, imageBase64 string) responses.ResponseInputItemUnionParam {
+	if imageBase64 == "" {
+		return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
+	}
+
+	messageContent := responses.ResponseInputMessageContentListParam{
+		responses.ResponseInputContentParamOfInputText(content),
+		{
+			OfInputImage: &responses.ResponseInputImageParam{
+				Detail:   responses.ResponseInputImageDetailAuto,
+				ImageURL: openai.String(fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)),
+			},
+		},
+	}
+
+	return responses.ResponseInputItemParamOfMessage(messageContent, responses.EasyInputMessageRoleUser)
+}
+
+func (p *Parser) callWithStructuredOutputResponses(
+	input responses.ResponseInputParam,
+	history []beancount.ConversationMessage,
+	prompt, imageBase64 string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	schema, ok := generateTransactionSchema().(map[string]any)
+	if !ok {
+		return nil, history, fmt.Errorf("failed to build transaction schema")
+	}
+
+	resp, err := p.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model: responses.ResponsesModel(p.model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		},
+		Text: responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
+					Name:        "transaction_data",
+					Description: openai.String("Beancount transaction data"),
+					Schema:      schema,
+					Strict:      openai.Bool(true),
+				},
+			},
+		},
+	})
+	if err != nil {
+		if isStructuredOutputUnsupported(err) || isResponsesProtocolUnsupported(err) {
+			return nil, history, err
+		}
+		return nil, history, fmt.Errorf("API call failed: %w", err)
+	}
+
+	content := strings.TrimSpace(resp.OutputText())
+	if content == "" {
+		return nil, history, fmt.Errorf("empty response from LLM")
+	}
+
+	logger.Infof("LLM Response (Responses Structured Output): %s", content)
+
+	transactionData, err := parseTransactionDataJSON(content)
+	if err != nil {
+		return nil, history, err
+	}
+
+	if transactionData.DateTime == "" && transactionData.Payee == "" && transactionData.Narration == "" {
+		return nil, history, fmt.Errorf("no transaction data found")
+	}
+
+	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	return transactionData, newHistory, nil
+}
+
+func (p *Parser) callWithJSONModeResponses(
+	input responses.ResponseInputParam,
+	history []beancount.ConversationMessage,
+	prompt, imageBase64 string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	resp, err := p.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model: responses.ResponsesModel(p.model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		},
+		Text: responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONObject: &shared.ResponseFormatJSONObjectParam{},
+			},
+		},
+	})
+	if err != nil {
+		if isResponsesProtocolUnsupported(err) {
+			return nil, history, err
+		}
+		return nil, history, fmt.Errorf("API call failed: %w", err)
+	}
+
+	content := strings.TrimSpace(resp.OutputText())
+	if content == "" {
+		return nil, history, fmt.Errorf("empty response from LLM")
+	}
+
+	logger.Infof("LLM Response (Responses JSON Mode): %s", content)
+
+	transactionData, err := p.parseResponse(content)
+	if err != nil {
+		return nil, history, err
+	}
+
+	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	return transactionData, newHistory, nil
+}
+
 // callWithStructuredOutput 使用 Structured Outputs 调用
 func (p *Parser) callWithStructuredOutput(
 	messages []openai.ChatCompletionMessageParamUnion,
@@ -425,6 +632,47 @@ func isStructuredOutputUnsupported(err error) bool {
 		strings.Contains(errStr, "invalid_request") ||
 		strings.Contains(errStr, "schema") ||
 		strings.Contains(errStr, "response_format")
+}
+
+func isResponsesProtocolUnsupported(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var apiErr *openai.Error
+	if errors.As(err, &apiErr) {
+		path := ""
+		if apiErr.Request != nil && apiErr.Request.URL != nil {
+			path = strings.ToLower(apiErr.Request.URL.Path)
+		}
+		if strings.Contains(path, "/responses") {
+			switch apiErr.StatusCode {
+			case 404, 405, 501:
+				return true
+			}
+		}
+	}
+
+	errStr := strings.ToLower(err.Error())
+	if strings.Contains(errStr, "/v1/responses") || strings.Contains(errStr, "/responses") {
+		if strings.Contains(errStr, "404") ||
+			strings.Contains(errStr, "405") ||
+			strings.Contains(errStr, "501") ||
+			strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "unknown") ||
+			strings.Contains(errStr, "no route") ||
+			strings.Contains(errStr, "unsupported") {
+			return true
+		}
+	}
+
+	if strings.Contains(errStr, "responses") &&
+		(strings.Contains(errStr, "endpoint") || strings.Contains(errStr, "path")) &&
+		(strings.Contains(errStr, "not found") || strings.Contains(errStr, "unsupported")) {
+		return true
+	}
+
+	return false
 }
 
 // updateHistory 更新对话历史
