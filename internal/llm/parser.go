@@ -10,6 +10,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/disintegration/imaging"
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/embed"
@@ -27,27 +29,68 @@ import (
 type Parser struct {
 	client       openai.Client
 	model        string
+	protocol     llmRequestProtocol
 	timeout      time.Duration
 	extendPrompt string
 	maxImageSize int
 }
 
+type llmRequestProtocol string
+
+const (
+	llmRequestProtocolChatCompletions llmRequestProtocol = "chat/completions"
+	llmRequestProtocolResponses       llmRequestProtocol = "responses"
+)
+
 // NewParser 创建 LLM 解析器
 func NewParser(baseURL, model, apiKey string, timeout int, extendPrompt string, maxImageSize int) *Parser {
+	resolvedBaseURL, protocol := resolveBaseURLAndProtocol(baseURL)
+
 	opts := []option.RequestOption{
 		option.WithAPIKey(apiKey),
 	}
-	if baseURL != "" {
-		opts = append(opts, option.WithBaseURL(baseURL))
+	if resolvedBaseURL != "" {
+		opts = append(opts, option.WithBaseURL(resolvedBaseURL))
 	}
+
+	logger.Infof("LLM request protocol: %s", protocol)
 
 	return &Parser{
 		client:       openai.NewClient(opts...),
 		model:        model,
+		protocol:     protocol,
 		timeout:      time.Duration(timeout) * time.Second,
 		extendPrompt: extendPrompt,
 		maxImageSize: maxImageSize,
 	}
+}
+
+func resolveBaseURLAndProtocol(baseURL string) (string, llmRequestProtocol) {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
+		return "", llmRequestProtocolChatCompletions
+	}
+
+	trimmed = strings.TrimSuffix(trimmed, "/")
+	u, err := url.Parse(trimmed)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return trimmed, llmRequestProtocolChatCompletions
+	}
+
+	pathWithoutTrailingSlash := strings.TrimSuffix(u.Path, "/")
+	if strings.HasSuffix(pathWithoutTrailingSlash, "/responses") {
+		u.Path = strings.TrimSuffix(pathWithoutTrailingSlash, "/responses")
+		u.RawPath = ""
+		return strings.TrimSuffix(u.String(), "/"), llmRequestProtocolResponses
+	}
+
+	if strings.HasSuffix(pathWithoutTrailingSlash, "/chat/completions") {
+		u.Path = strings.TrimSuffix(pathWithoutTrailingSlash, "/chat/completions")
+		u.RawPath = ""
+		return strings.TrimSuffix(u.String(), "/"), llmRequestProtocolChatCompletions
+	}
+
+	return trimmed, llmRequestProtocolChatCompletions
 }
 
 // ParseImage 解析图片中的交易信息
@@ -73,9 +116,9 @@ func (p *Parser) ParseImageWithHistory(
 	// 构建提示词
 	prompt := p.buildPrompt(accountNames, tagNames)
 
-	// 构建消息列表
+	// 构建请求适配层负载
 	// userPromptOverride 作为 currentPrompt 传入，用于引导重试时添加当前用户消息
-	messages := p.buildMessages(prompt, base64Image, history, userPromptOverride)
+	payload := p.buildRequestPayload(prompt, base64Image, history, userPromptOverride)
 
 	// 记录 LLM 输入日志
 	logger.Debugf("LLM Input: history_count=%d, has_image=%v, current_prompt_len=%d", len(history), base64Image != "", len(userPromptOverride))
@@ -104,15 +147,37 @@ func (p *Parser) ParseImageWithHistory(
 		// 引导重试时不保存图片
 	}
 
-	// 尝试使用 Structured Outputs
-	transactionData, newHistory, err := p.callWithStructuredOutput(messages, history, userPromptForHistory, imageBase64ForHistory)
-	if err != nil {
-		logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
-		// 降级：尝试普通 JSON 模式
-		transactionData, newHistory, err = p.callWithJSONMode(messages, history, userPromptForHistory, imageBase64ForHistory)
+	var transactionData *beancount.TransactionData
+	var newHistory []beancount.ConversationMessage
+
+	switch p.protocol {
+	case llmRequestProtocolResponses:
+		transactionData, newHistory, err = p.callWithResponsesStructuredOutput(
+			payload.responseInput,
+			history,
+			userPromptForHistory,
+			imageBase64ForHistory,
+		)
+	default:
+		// chat/completions 保持现有行为：先 Structured Outputs，再降级 JSON mode
+		transactionData, newHistory, err = p.callWithStructuredOutput(
+			payload.chatMessages,
+			history,
+			userPromptForHistory,
+			imageBase64ForHistory,
+		)
 		if err != nil {
-			return nil, history, fmt.Errorf("failed to parse response: %w", err)
+			logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
+			transactionData, newHistory, err = p.callWithJSONMode(
+				payload.chatMessages,
+				history,
+				userPromptForHistory,
+				imageBase64ForHistory,
+			)
 		}
+	}
+	if err != nil {
+		return nil, history, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	return transactionData, newHistory, nil
@@ -323,6 +388,107 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 	return messages
 }
 
+type parserRequestPayload struct {
+	chatMessages  []openai.ChatCompletionMessageParamUnion
+	responseInput responses.ResponseInputParam
+}
+
+func (p *Parser) buildRequestPayload(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) parserRequestPayload {
+	return parserRequestPayload{
+		chatMessages:  p.buildMessages(prompt, base64Image, history, currentPrompt),
+		responseInput: p.buildResponseInput(prompt, base64Image, history, currentPrompt),
+	}
+}
+
+func (p *Parser) buildResponseInput(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) responses.ResponseInputParam {
+	input := responses.ResponseInputParam{}
+
+	// 如果历史为空，使用 prompt 和 base64Image 构建新消息（第一次识别）
+	if len(history) == 0 {
+		input = append(input, buildResponsesUserMessage(prompt, base64Image))
+		return input
+	}
+
+	// 历史不为空，从历史构建消息（引导重试）
+	for _, msg := range history {
+		switch msg.Role {
+		case "user":
+			input = append(input, buildResponsesUserMessage(msg.Content, msg.ImageBase64))
+		case "assistant":
+			input = append(input, responses.ResponseInputItemParamOfMessage(msg.Content, responses.EasyInputMessageRoleAssistant))
+		}
+	}
+
+	// 添加当前用户消息（引导重试时的用户引导）
+	if currentPrompt != "" {
+		input = append(input, responses.ResponseInputItemParamOfMessage(currentPrompt, responses.EasyInputMessageRoleUser))
+	}
+
+	return input
+}
+
+func buildResponsesUserMessage(content, imageBase64 string) responses.ResponseInputItemUnionParam {
+	if imageBase64 == "" {
+		return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
+	}
+
+	messageContent := responses.ResponseInputMessageContentListParam{
+		responses.ResponseInputContentParamOfInputText(content),
+		{
+			OfInputImage: &responses.ResponseInputImageParam{
+				Detail:   responses.ResponseInputImageDetailAuto,
+				ImageURL: openai.String(fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)),
+			},
+		},
+	}
+
+	return responses.ResponseInputItemParamOfMessage(messageContent, responses.EasyInputMessageRoleUser)
+}
+
+func (p *Parser) callWithResponsesStructuredOutput(
+	input responses.ResponseInputParam,
+	history []beancount.ConversationMessage,
+	prompt, imageBase64 string,
+) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
+	defer cancel()
+
+	resp, err := p.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model: responses.ResponsesModel(p.model),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfInputItemList: input,
+		},
+		Text: responses.ResponseTextConfigParam{
+			Format: responses.ResponseFormatTextConfigUnionParam{
+				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
+					Name:        "transaction_data",
+					Description: openai.String("Beancount transaction data"),
+					Schema:      generateTransactionSchema(),
+					Strict:      openai.Bool(true),
+				},
+			},
+		},
+	})
+	if err != nil {
+		return nil, history, fmt.Errorf("API call failed: %w", err)
+	}
+
+	content := strings.TrimSpace(resp.OutputText())
+	if content == "" {
+		return nil, history, fmt.Errorf("empty response from LLM")
+	}
+
+	logger.Infof("LLM Response (Responses Structured Output): %s", content)
+
+	transactionData, err := p.parseResponse(content)
+	if err != nil {
+		return nil, history, err
+	}
+
+	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	return transactionData, newHistory, nil
+}
+
 // callWithStructuredOutput 使用 Structured Outputs 调用
 func (p *Parser) callWithStructuredOutput(
 	messages []openai.ChatCompletionMessageParamUnion,
@@ -446,7 +612,7 @@ func (p *Parser) updateHistory(history []beancount.ConversationMessage, userProm
 }
 
 // generateTransactionSchema 生成 TransactionData 的 JSON Schema
-func generateTransactionSchema() interface{} {
+func generateTransactionSchema() map[string]any {
 	return map[string]interface{}{
 		"type":                 "object",
 		"additionalProperties": false,

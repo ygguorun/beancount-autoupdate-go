@@ -4,6 +4,10 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/openai/openai-go/v3/responses"
+
+	"beancount-autoupdate/internal/beancount"
 )
 
 func TestParseResponse(t *testing.T) {
@@ -143,10 +147,7 @@ func TestParseResponse(t *testing.T) {
 }
 
 func TestGenerateTransactionSchema(t *testing.T) {
-	schema, ok := generateTransactionSchema().(map[string]interface{})
-	if !ok {
-		t.Fatalf("schema type assertion failed")
-	}
+	schema := generateTransactionSchema()
 
 	if schema["additionalProperties"] != false {
 		t.Fatalf("root additionalProperties must be false")
@@ -264,6 +265,122 @@ func TestIsStructuredOutputUnsupported(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestResolveBaseURLAndProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		baseURL      string
+		wantBaseURL  string
+		wantProtocol llmRequestProtocol
+	}{
+		{
+			name:         "empty base url defaults to chat",
+			baseURL:      "",
+			wantBaseURL:  "",
+			wantProtocol: llmRequestProtocolChatCompletions,
+		},
+		{
+			name:         "base url only defaults to chat",
+			baseURL:      "https://api.example.com/v1",
+			wantBaseURL:  "https://api.example.com/v1",
+			wantProtocol: llmRequestProtocolChatCompletions,
+		},
+		{
+			name:         "chat endpoint switches to chat protocol",
+			baseURL:      "https://api.example.com/v1/chat/completions/",
+			wantBaseURL:  "https://api.example.com/v1",
+			wantProtocol: llmRequestProtocolChatCompletions,
+		},
+		{
+			name:         "responses endpoint switches to responses protocol",
+			baseURL:      "https://api.example.com/v1/responses",
+			wantBaseURL:  "https://api.example.com/v1",
+			wantProtocol: llmRequestProtocolResponses,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotBaseURL, gotProtocol := resolveBaseURLAndProtocol(tc.baseURL)
+			if gotBaseURL != tc.wantBaseURL {
+				t.Fatalf("unexpected base url: got %q want %q", gotBaseURL, tc.wantBaseURL)
+			}
+			if gotProtocol != tc.wantProtocol {
+				t.Fatalf("unexpected protocol: got %q want %q", gotProtocol, tc.wantProtocol)
+			}
+		})
+	}
+}
+
+func TestBuildResponseInput(t *testing.T) {
+	p := &Parser{}
+
+	t.Run("first request with image", func(t *testing.T) {
+		input := p.buildResponseInput("prompt", "abc123", nil, "")
+		if len(input) != 1 {
+			t.Fatalf("unexpected input length: got %d want 1", len(input))
+		}
+
+		msg := input[0].OfMessage
+		if msg == nil {
+			t.Fatalf("expected message item")
+		}
+		if msg.Role != responses.EasyInputMessageRoleUser {
+			t.Fatalf("unexpected role: got %q", msg.Role)
+		}
+
+		parts := msg.Content.OfInputItemContentList
+		if len(parts) != 2 {
+			t.Fatalf("unexpected content parts length: got %d want 2", len(parts))
+		}
+		if parts[0].OfInputText == nil || parts[0].OfInputText.Text != "prompt" {
+			t.Fatalf("unexpected text part")
+		}
+		if parts[1].OfInputImage == nil {
+			t.Fatalf("expected image part")
+		}
+		if !parts[1].OfInputImage.ImageURL.Valid() {
+			t.Fatalf("expected image url to be set")
+		}
+		if parts[1].OfInputImage.ImageURL.Value != "data:image/jpeg;base64,abc123" {
+			t.Fatalf("unexpected image url: %q", parts[1].OfInputImage.ImageURL.Value)
+		}
+	})
+
+	t.Run("history and guidance", func(t *testing.T) {
+		history := []beancount.ConversationMessage{
+			{Role: "user", Content: "first", ImageBase64: "img1"},
+			{Role: "assistant", Content: "assistant reply"},
+		}
+
+		input := p.buildResponseInput("ignored", "ignored", history, "please retry")
+		if len(input) != 3 {
+			t.Fatalf("unexpected input length: got %d want 3", len(input))
+		}
+
+		assistant := input[1].OfMessage
+		if assistant == nil {
+			t.Fatalf("expected assistant message item")
+		}
+		if assistant.Role != responses.EasyInputMessageRoleAssistant {
+			t.Fatalf("unexpected assistant role: got %q", assistant.Role)
+		}
+		if !assistant.Content.OfString.Valid() || assistant.Content.OfString.Value != "assistant reply" {
+			t.Fatalf("unexpected assistant content")
+		}
+
+		guidance := input[2].OfMessage
+		if guidance == nil {
+			t.Fatalf("expected guidance message item")
+		}
+		if guidance.Role != responses.EasyInputMessageRoleUser {
+			t.Fatalf("unexpected guidance role: got %q", guidance.Role)
+		}
+		if !guidance.Content.OfString.Valid() || guidance.Content.OfString.Value != "please retry" {
+			t.Fatalf("unexpected guidance content")
+		}
+	})
 }
 
 type testErr struct {
