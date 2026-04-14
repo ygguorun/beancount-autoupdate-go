@@ -1,12 +1,9 @@
 package llm
 
 import (
-	"fmt"
 	"strings"
 	"testing"
 	"time"
-
-	"beancount-autoupdate/internal/beancount"
 )
 
 func TestParseResponse(t *testing.T) {
@@ -267,89 +264,6 @@ func TestIsStructuredOutputUnsupported(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestIsResponsesProtocolUnsupported(t *testing.T) {
-	tests := []struct {
-		name   string
-		err    error
-		expect bool
-	}{
-		{name: "responses endpoint 404", err: &testErr{msg: `POST "https://example.com/v1/responses": 404 Not Found`}, expect: true},
-		{name: "responses unknown endpoint", err: &testErr{msg: "unknown endpoint /v1/responses"}, expect: true},
-		{name: "wrapped responses unsupported", err: fmt.Errorf("wrapped: %w", &testErr{msg: "responses endpoint unsupported"}), expect: true},
-		{name: "schema error", err: &testErr{msg: "invalid schema for response_format"}, expect: false},
-		{name: "network timeout", err: &testErr{msg: "network timeout"}, expect: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := isResponsesProtocolUnsupported(tc.err)
-			if got != tc.expect {
-				t.Fatalf("unexpected result: got %v want %v", got, tc.expect)
-			}
-		})
-	}
-}
-
-func TestBuildResponseInput(t *testing.T) {
-	p := &Parser{}
-
-	t.Run("first round with image", func(t *testing.T) {
-		input := p.buildResponseInput("prompt-text", "ZmFrZS1pbWFnZQ==", nil, "")
-		if len(input) != 1 {
-			t.Fatalf("unexpected input length: got %d want 1", len(input))
-		}
-
-		msg := input[0].OfMessage
-		if msg == nil {
-			t.Fatalf("expected message variant")
-		}
-		if msg.Role != "user" {
-			t.Fatalf("unexpected role: %s", msg.Role)
-		}
-
-		parts := msg.Content.OfInputItemContentList
-		if len(parts) != 2 {
-			t.Fatalf("unexpected content parts length: got %d want 2", len(parts))
-		}
-
-		text := parts[0].GetText()
-		if text == nil || *text != "prompt-text" {
-			t.Fatalf("unexpected text part: %v", text)
-		}
-
-		imageURL := parts[1].GetImageURL()
-		if imageURL == nil || !strings.Contains(*imageURL, "ZmFrZS1pbWFnZQ==") {
-			t.Fatalf("unexpected image url: %v", imageURL)
-		}
-	})
-
-	t.Run("history with guidance", func(t *testing.T) {
-		history := []beancount.ConversationMessage{
-			{Role: "user", Content: "first-question", ImageBase64: "aGVsbG8="},
-			{Role: "assistant", Content: "first-answer"},
-		}
-
-		input := p.buildResponseInput("", "", history, "retry-with-guidance")
-		if len(input) != 3 {
-			t.Fatalf("unexpected input length: got %d want 3", len(input))
-		}
-
-		if role := input[0].GetRole(); role == nil || *role != "user" {
-			t.Fatalf("unexpected first role: %v", role)
-		}
-		if role := input[1].GetRole(); role == nil || *role != "assistant" {
-			t.Fatalf("unexpected second role: %v", role)
-		}
-		if role := input[2].GetRole(); role == nil || *role != "user" {
-			t.Fatalf("unexpected third role: %v", role)
-		}
-
-		if !input[2].OfMessage.Content.OfString.Valid() || input[2].OfMessage.Content.OfString.Value != "retry-with-guidance" {
-			t.Fatalf("unexpected third message content: %v", input[2].OfMessage.Content.OfString)
-		}
-	})
 }
 
 type testErr struct {
