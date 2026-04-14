@@ -470,7 +470,7 @@ func generateTransactionSchema() interface{} {
 						"currency": map[string]string{"type": "string"},
 						"flag":     map[string]string{"type": "string"},
 					},
-					"required": []string{"account", "amount"},
+					"required": []string{"account", "amount", "currency", "flag"},
 				},
 			},
 			"order_id": map[string]string{"type": "string"},
@@ -491,7 +491,7 @@ func generateTransactionSchema() interface{} {
 				"items": map[string]string{"type": "string"},
 			},
 		},
-		"required": []string{"datetime", "flag", "payee", "narration", "postings", "order_id", "extra", "special_directives"},
+		"required": []string{"datetime", "flag", "payee", "narration", "tags", "postings", "order_id", "extra", "special_directives"},
 	}
 }
 
