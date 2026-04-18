@@ -173,6 +173,8 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 	logger.Infof("找到待确认交易: transactionID=%s, payee=%s, narration=%s", transactionID, data.Payee, data.Narration)
 
 	switch action {
+	case "open_preview":
+		b.openPendingPreview(userID, transactionID)
 	case "confirm":
 		b.confirmTransaction(userID, transactionID)
 	case "cancel":

@@ -3,6 +3,7 @@ package telegram
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"beancount-autoupdate/internal/logger"
 
@@ -144,7 +145,7 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 func (b *Bot) sendNewTransactionPreview(userID int, transactionID string, text string, keyboard *tgbotapi.InlineKeyboardMarkup, oldMessageID int) {
 	msg := tgbotapi.NewMessage(int64(userID), text)
 	msg.ReplyMarkup = keyboard
-	sentMsg, err := b.botAPI.Send(msg)
+	sentMsg, err := b.sendPreviewMessageWithRetry(msg, transactionID)
 	if err != nil {
 		logger.Errorf("发送新消息失败: transactionID=%s, error=%v", transactionID, err)
 		return
@@ -178,4 +179,29 @@ func (b *Bot) sendNewTransactionPreview(userID int, transactionID string, text s
 	if stateChanged {
 		b.persistSessionState()
 	}
+}
+
+func (b *Bot) sendPreviewMessageWithRetry(msg tgbotapi.MessageConfig, transactionID string) (tgbotapi.Message, error) {
+	const maxAttempts = 3
+	delay := time.Second
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		sentMsg, err := b.botAPI.Send(msg)
+		if err == nil {
+			if attempt > 1 {
+				logger.Infof("交易预览发送重试成功: transactionID=%s, attempt=%d", transactionID, attempt)
+			}
+			return sentMsg, nil
+		}
+
+		lastErr = err
+		if attempt < maxAttempts {
+			logger.Warnf("交易预览发送失败，准备重试: transactionID=%s, attempt=%d/%d, error=%v", transactionID, attempt, maxAttempts, err)
+			time.Sleep(delay)
+			delay *= 2
+		}
+	}
+
+	return tgbotapi.Message{}, fmt.Errorf("failed after %d attempts: %w", maxAttempts, lastErr)
 }
