@@ -335,9 +335,12 @@ func (m *Manager) HasChanges() (bool, error) {
 
 // CommitChanges 提交更改
 func (m *Manager) CommitChanges(message string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	logger.Infof("开始执行 Git 提交...")
 	logger.Infof("提交信息: %s", message)
-	logger.Infof("仓库路径: %s", m.repoPath)
+	logger.Infof("git-op=commit repo=%s", m.repoPath)
 
 	// 检查是否有远程仓库
 	if !m.autoCommit {
@@ -384,8 +387,25 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 	// 添加所有更改
 	logger.Infof("添加所有更改到暂存区...")
 	if _, err := worktree.Add("."); err != nil {
-		logger.Errorf("添加文件到暂存区失败: %v", err)
-		return false, fmt.Errorf("failed to add files: %w", err)
+		if isPackfileNotFound(err) {
+			logger.Warnf("git-op=commit repo=%s 首次暂存失败，尝试重新打开仓库后重试: %v", m.repoPath, err)
+
+			worktree, err = m.reopenRepoAndWorktreeLocked()
+			if err != nil {
+				logger.Errorf("git-op=commit repo=%s 重新打开仓库失败: %v", m.repoPath, err)
+				return false, fmt.Errorf("failed to reopen repo after add error: %w", err)
+			}
+
+			if _, err = worktree.Add("."); err == nil {
+				logger.Infof("git-op=commit repo=%s 重新打开仓库后暂存成功", m.repoPath)
+			} else {
+				logger.Errorf("git-op=commit repo=%s 重试暂存仍然失败: %v", m.repoPath, err)
+				return false, fmt.Errorf("failed to add files after retry: %w", err)
+			}
+		} else {
+			logger.Errorf("添加文件到暂存区失败: %v", err)
+			return false, fmt.Errorf("failed to add files: %w", err)
+		}
 	}
 	logger.Infof("文件已添加到暂存区")
 
@@ -417,8 +437,11 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 
 // PushChanges 推送更改到远程仓库
 func (m *Manager) PushChanges() (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	logger.Infof("开始执行 Git 推送...")
-	logger.Infof("仓库路径: %s", m.repoPath)
+	logger.Infof("git-op=push repo=%s", m.repoPath)
 
 	// 检查是否自动推送
 	if !m.autoPush {
@@ -449,7 +472,7 @@ func (m *Manager) PushChanges() (bool, error) {
 
 	// 先拉取以避免冲突
 	logger.Infof("先拉取远程更改以避免冲突...")
-	pullSuccess, pullErr := m.PullChanges()
+	pullSuccess, pullErr := m.pullChangesLocked()
 	switch {
 	case pullErr != nil:
 		logger.Errorf("拉取远程更改失败: %v", pullErr)
@@ -493,6 +516,15 @@ func (m *Manager) PushChanges() (bool, error) {
 
 // PullChanges 拉取远程更改
 func (m *Manager) PullChanges() (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return m.pullChangesLocked()
+}
+
+func (m *Manager) pullChangesLocked() (bool, error) {
+	logger.Infof("git-op=pull repo=%s", m.repoPath)
+
 	if m.repo == nil {
 		return false, nil
 	}
@@ -534,6 +566,30 @@ func (m *Manager) PullChanges() (bool, error) {
 
 	logger.Infof("拉取成功")
 	return true, nil
+}
+
+func (m *Manager) reopenRepoAndWorktreeLocked() (*git.Worktree, error) {
+	repo, err := git.PlainOpen(m.repoPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reopen repo: %w", err)
+	}
+
+	m.repo = repo
+
+	worktree, err := m.repo.Worktree()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get worktree after reopen: %w", err)
+	}
+
+	return worktree, nil
+}
+
+func isPackfileNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return strings.Contains(strings.ToLower(err.Error()), "packfile not found")
 }
 
 // GetStatus 获取仓库状态
