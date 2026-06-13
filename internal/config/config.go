@@ -68,13 +68,12 @@ type LoggingConfig struct {
 
 // WebDAVConfig WebDAV 配置
 type WebDAVConfig struct {
-	Enabled          bool   `toml:"enabled"`
-	URL              string `toml:"url"`
-	Username         string `toml:"username"`
-	Password         string `toml:"password"`
-	Path             string `toml:"path"`
-	FilenameTemplate string `toml:"filename_template"`
-	VerifySSL        bool   `toml:"verify_ssl"`
+	Enabled   bool   `toml:"enabled"`
+	URL       string `toml:"url"`
+	Username  string `toml:"username"`
+	Password  string `toml:"password"`
+	Path      string `toml:"path"`
+	VerifySSL bool   `toml:"verify_ssl"`
 }
 
 // HTTPServerConfig HTTP 上传服务配置

@@ -3,7 +3,7 @@ package telegram
 import (
 	"fmt"
 	"math/rand"
-	"path/filepath"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -43,7 +43,7 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 	}
 
 	tempFilenameTemplate := fmt.Sprintf("temp_{datetime}_{uuid}%s", fileExt)
-	tempWebDAVPath := filepath.Join(b.config.WebDAV.Path, tempFilenameTemplate)
+	tempWebDAVPath := path.Join(b.config.WebDAV.Path, tempFilenameTemplate)
 	logger.Infof("生成的临时文件名模板: %s", tempFilenameTemplate)
 	logger.Infof("临时 WebDAV 路径: %s", tempWebDAVPath)
 
@@ -253,13 +253,11 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		transactionTime, _ := time.Parse("2006-01-02 15:04:05", data.Date+" "+data.Time)
 		logger.Infof("交易时间: %s", transactionTime)
 
-		finalFilename := b.webdavMgr.GenerateFilename(b.config.WebDAV.FilenameTemplate, transactionTime, data.OrderID)
-		finalWebDAVPath := filepath.Join(b.config.WebDAV.Path, finalFilename)
+		finalWebDAVPath := b.webdavMgr.GenerateReceiptPath(b.config.WebDAV.Path, transactionTime, data.OrderID, path.Ext(data.TempWebDAVPath))
 
 		logger.Infof("目标路径: %s", finalWebDAVPath)
 		logger.Infof("WebDAV URL: %s", b.config.WebDAV.URL)
 		logger.Infof("WebDAV Path: %s", b.config.WebDAV.Path)
-		logger.Infof("Filename Template: %s", b.config.WebDAV.FilenameTemplate)
 
 		logger.Infof("开始执行 WebDAV Move 操作...")
 		success, err := b.webdavMgr.MoveFile(data.TempWebDAVPath, finalWebDAVPath)
@@ -271,7 +269,7 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 			if finalWebDAVPath == "" {
 				finalImageURL = b.config.WebDAV.URL
 			} else {
-				finalImageURL = b.config.WebDAV.URL + "/" + finalWebDAVPath
+				finalImageURL = strings.TrimRight(b.config.WebDAV.URL, "/") + "/" + finalWebDAVPath
 			}
 			logger.Infof("最终图片 URL: %s", finalImageURL)
 		} else {

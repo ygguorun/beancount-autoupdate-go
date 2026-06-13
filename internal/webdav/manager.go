@@ -84,16 +84,14 @@ func (m *Manager) TestConnection() (bool, error) {
 
 // UploadFile 上传文件
 func (m *Manager) UploadFile(localPath, remotePath, filenameTemplate string, date time.Time, orderID string) (string, error) {
-	// 确保目录存在
-	if err := m.ensureDirectory(remotePath); err != nil {
-		return "", fmt.Errorf("failed to ensure directory: %w", err)
-	}
-
 	// 生成文件名
 	filename := m.GenerateFilename(filenameTemplate, date, orderID)
 
 	// 构建完整的远程路径
 	remoteFilePath := path.Join(remotePath, filename)
+	if err := m.ensureParentDirectory(remoteFilePath); err != nil {
+		return "", fmt.Errorf("failed to ensure directory: %w", err)
+	}
 
 	// 读取本地文件
 	data, err := os.ReadFile(localPath)
@@ -114,16 +112,14 @@ func (m *Manager) UploadFile(localPath, remotePath, filenameTemplate string, dat
 
 // UploadFileFromBytes 从字节数组上传文件
 func (m *Manager) UploadFileFromBytes(data []byte, remotePath, filenameTemplate string, date time.Time, orderID string) (string, error) {
-	// 确保目录存在
-	if err := m.ensureDirectory(remotePath); err != nil {
-		return "", fmt.Errorf("failed to ensure directory: %w", err)
-	}
-
 	// 生成文件名
 	filename := m.GenerateFilename(filenameTemplate, date, orderID)
 
 	// 构建完整的远程路径
 	remoteFilePath := path.Join(remotePath, filename)
+	if err := m.ensureParentDirectory(remoteFilePath); err != nil {
+		return "", fmt.Errorf("failed to ensure directory: %w", err)
+	}
 
 	// 上传文件
 	if err := m.uploadBytes(data, remoteFilePath); err != nil {
@@ -163,10 +159,7 @@ func (m *Manager) uploadBytes(data []byte, remotePath string) error {
 // GenerateFilename 根据模板生成文件名
 func (m *Manager) GenerateFilename(template string, date time.Time, orderID string) string {
 	// 使用交易时间，如果没有则使用当前时间
-	transactionTime := date
-	if transactionTime.IsZero() {
-		transactionTime = time.Now()
-	}
+	transactionTime := effectiveTime(date)
 
 	// 准备替换变量
 	variables := map[string]string{
@@ -185,6 +178,50 @@ func (m *Manager) GenerateFilename(template string, date time.Time, orderID stri
 	return filename
 }
 
+// GenerateReceiptPath 生成确认后的收据图片路径：YYYYMM/DD_HHMMSS[_orderID]_{uuid}{ext}。
+func (m *Manager) GenerateReceiptPath(remotePath string, date time.Time, orderID string, extension string) string {
+	transactionTime := effectiveTime(date)
+	return path.Join(remotePath, transactionTime.Format("200601"), generateReceiptFilename(transactionTime, orderID, extension))
+}
+
+// GenerateReceiptFilename 生成确认后的收据图片文件名。
+func (m *Manager) GenerateReceiptFilename(date time.Time, orderID string, extension string) string {
+	return generateReceiptFilename(effectiveTime(date), orderID, extension)
+}
+
+func generateReceiptFilename(transactionTime time.Time, orderID string, extension string) string {
+	parts := []string{transactionTime.Format("02_150405")}
+	if orderID = sanitizeFilenamePart(orderID); orderID != "" {
+		parts = append(parts, orderID)
+	}
+	parts = append(parts, uuid.New().String()[:8])
+	return strings.Join(parts, "_") + normalizeExtension(extension)
+}
+
+func effectiveTime(date time.Time) time.Time {
+	if date.IsZero() {
+		return time.Now()
+	}
+	return date
+}
+
+func normalizeExtension(extension string) string {
+	extension = strings.TrimSpace(extension)
+	if extension == "" {
+		return ".jpg"
+	}
+	if !strings.HasPrefix(extension, ".") {
+		return "." + extension
+	}
+	return extension
+}
+
+func sanitizeFilenamePart(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.NewReplacer("/", "_", "\\", "_").Replace(value)
+	return value
+}
+
 // buildURL 构建完整的 WebDAV URL
 func (m *Manager) buildURL(remotePath string) string {
 	remotePath = strings.TrimLeft(remotePath, "/")
@@ -196,7 +233,7 @@ func (m *Manager) buildURL(remotePath string) string {
 
 // ensureDirectory 确保目录存在
 func (m *Manager) ensureDirectory(directoryPath string) error {
-	if directoryPath == "" || directoryPath == "/" {
+	if directoryPath == "" || directoryPath == "/" || directoryPath == "." {
 		return nil
 	}
 
@@ -221,6 +258,11 @@ func (m *Manager) ensureDirectory(directoryPath string) error {
 	}
 
 	return nil
+}
+
+func (m *Manager) ensureParentDirectory(remoteFilePath string) error {
+	directoryPath := path.Dir(strings.Trim(remoteFilePath, "/"))
+	return m.ensureDirectory(directoryPath)
 }
 
 // createDirectory 创建目录
@@ -258,6 +300,10 @@ func (m *Manager) MoveFile(sourcePath, destinationPath string) (bool, error) {
 	// 检查源文件是否存在
 	if exists, err := m.fileExists(sourcePath); err != nil || !exists {
 		return false, fmt.Errorf("source file not found")
+	}
+
+	if err := m.ensureParentDirectory(destinationPath); err != nil {
+		return false, fmt.Errorf("failed to ensure destination directory: %w", err)
 	}
 
 	// 移动文件

@@ -84,7 +84,6 @@ url = "https://your-webdav-server.com/dav"  # WebDAV 服务器 URL
 username = ""  # 用户名（从环境变量 WEBDAV_USERNAME 读取）
 password = ""  # 密码（从环境变量 WEBDAV_PASSWORD 读取）
 path = "path/to/receipts"  # 上传路径
-filename_template = "{datetime}_{order_id}_{uuid}.jpg"  # 文件名模板，支持变量: {date}, {order_id}, {datetime}, {uuid}
 verify_ssl = true  # 是否验证 SSL 证书
 
 [http_server]
