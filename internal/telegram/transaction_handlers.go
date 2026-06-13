@@ -265,12 +265,7 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 
 		if success {
 			logger.Infof("WebDAV 文件重命名成功")
-			finalWebDAVPath = strings.TrimLeft(finalWebDAVPath, "/")
-			if finalWebDAVPath == "" {
-				finalImageURL = b.config.WebDAV.URL
-			} else {
-				finalImageURL = strings.TrimRight(b.config.WebDAV.URL, "/") + "/" + finalWebDAVPath
-			}
+			finalImageURL = buildRecordedWebDAVURL(b.config.WebDAV.URL, b.config.WebDAV.PublicURL, b.config.WebDAV.Path, finalWebDAVPath)
 			logger.Infof("最终图片 URL: %s", finalImageURL)
 		} else {
 			logger.Errorf("WebDAV 文件重命名失败: %v", err)
@@ -379,6 +374,38 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		maskPayee(data.Payee),
 	)
 	b.sendMessageWithNilKeyboard(userID, response)
+}
+
+func buildRecordedWebDAVURL(uploadURL string, publicURL string, webdavPath string, finalWebDAVPath string) string {
+	finalWebDAVPath = strings.TrimLeft(finalWebDAVPath, "/")
+	if finalWebDAVPath == "" {
+		if strings.TrimSpace(publicURL) != "" {
+			return strings.TrimRight(publicURL, "/")
+		}
+		return strings.TrimRight(uploadURL, "/")
+	}
+
+	baseURL := strings.TrimRight(uploadURL, "/")
+	pathForRecord := finalWebDAVPath
+
+	if strings.TrimSpace(publicURL) != "" {
+		baseURL = strings.TrimRight(publicURL, "/")
+		trimmedWebDAVPath := strings.Trim(strings.TrimSpace(webdavPath), "/")
+		if trimmedWebDAVPath != "" {
+			prefix := trimmedWebDAVPath + "/"
+			if strings.HasPrefix(pathForRecord, prefix) {
+				pathForRecord = strings.TrimPrefix(pathForRecord, prefix)
+			} else if pathForRecord == trimmedWebDAVPath {
+				pathForRecord = ""
+			}
+		}
+	}
+
+	if pathForRecord == "" {
+		return baseURL
+	}
+
+	return baseURL + "/" + pathForRecord
 }
 
 // cancelTransaction 取消交易

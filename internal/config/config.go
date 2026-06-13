@@ -70,6 +70,7 @@ type LoggingConfig struct {
 type WebDAVConfig struct {
 	Enabled   bool   `toml:"enabled"`
 	URL       string `toml:"url"`
+	PublicURL string `toml:"public_url"`
 	Username  string `toml:"username"`
 	Password  string `toml:"password"`
 	Path      string `toml:"path"`

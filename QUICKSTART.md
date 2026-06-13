@@ -32,6 +32,7 @@ repo_url = "git@github.com:username/beancount-data.git"
 [webdav]
 enabled = true
 url = "https://your-webdav-server.com/dav"
+public_url = "https://receipts.example.com"
 path = "Baidu/beancount/receipts"
 
 [http_server]
