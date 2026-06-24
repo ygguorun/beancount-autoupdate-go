@@ -40,6 +40,7 @@ type llmRequestProtocol string
 const (
 	llmRequestProtocolChatCompletions llmRequestProtocol = "chat/completions"
 	llmRequestProtocolResponses       llmRequestProtocol = "responses"
+	llmGuidancePrefix                                    = "补充信息："
 )
 
 // NewParser 创建 LLM 解析器
@@ -363,17 +364,18 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
+			content := formatGuidanceForLLM(msg.Content)
 			// 如果历史消息包含图片，构建包含图片的用户消息
 			if msg.ImageBase64 != "" {
 				content := []openai.ChatCompletionContentPartUnionParam{
-					openai.TextContentPart(msg.Content),
+					openai.TextContentPart(content),
 					openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
 						URL: fmt.Sprintf("data:image/jpeg;base64,%s", msg.ImageBase64),
 					}),
 				}
 				messages = append(messages, openai.UserMessage(content))
 			} else {
-				messages = append(messages, openai.UserMessage(msg.Content))
+				messages = append(messages, openai.UserMessage(content))
 			}
 		case "assistant":
 			messages = append(messages, openai.AssistantMessage(msg.Content))
@@ -382,7 +384,7 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 
 	// 添加当前用户消息（引导重试时的用户引导）
 	if currentPrompt != "" {
-		messages = append(messages, openai.UserMessage(currentPrompt))
+		messages = append(messages, openai.UserMessage(formatGuidanceForLLM(currentPrompt)))
 	}
 
 	return messages
@@ -413,7 +415,7 @@ func (p *Parser) buildResponseInput(prompt, base64Image string, history []beanco
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
-			input = append(input, buildResponsesUserMessage(msg.Content, msg.ImageBase64))
+			input = append(input, buildResponsesUserMessage(formatGuidanceForLLM(msg.Content), msg.ImageBase64))
 		case "assistant":
 			input = append(input, responses.ResponseInputItemParamOfMessage(msg.Content, responses.EasyInputMessageRoleAssistant))
 		}
@@ -421,7 +423,7 @@ func (p *Parser) buildResponseInput(prompt, base64Image string, history []beanco
 
 	// 添加当前用户消息（引导重试时的用户引导）
 	if currentPrompt != "" {
-		input = append(input, responses.ResponseInputItemParamOfMessage(currentPrompt, responses.EasyInputMessageRoleUser))
+		input = append(input, responses.ResponseInputItemParamOfMessage(formatGuidanceForLLM(currentPrompt), responses.EasyInputMessageRoleUser))
 	}
 
 	return input
@@ -443,6 +445,15 @@ func buildResponsesUserMessage(content, imageBase64 string) responses.ResponseIn
 	}
 
 	return responses.ResponseInputItemParamOfMessage(messageContent, responses.EasyInputMessageRoleUser)
+}
+
+func formatGuidanceForLLM(content string) string {
+	trimmed := strings.TrimSpace(content)
+	if trimmed == "" || strings.HasPrefix(trimmed, llmGuidancePrefix) {
+		return content
+	}
+
+	return llmGuidancePrefix + content
 }
 
 func (p *Parser) callWithResponsesStructuredOutput(

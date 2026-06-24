@@ -377,7 +377,20 @@ func TestBuildResponseInput(t *testing.T) {
 		if guidance.Role != responses.EasyInputMessageRoleUser {
 			t.Fatalf("unexpected guidance role: got %q", guidance.Role)
 		}
-		if !guidance.Content.OfString.Valid() || guidance.Content.OfString.Value != "please retry" {
+		if !guidance.Content.OfString.Valid() || guidance.Content.OfString.Value != "补充信息：please retry" {
+			t.Fatalf("unexpected guidance content")
+		}
+	})
+
+	t.Run("guidance prefix idempotent", func(t *testing.T) {
+		history := []beancount.ConversationMessage{{Role: "assistant", Content: "assistant reply"}}
+
+		input := p.buildResponseInput("ignored", "ignored", history, "补充信息：please retry")
+		guidance := input[1].OfMessage
+		if guidance == nil {
+			t.Fatalf("expected guidance message item")
+		}
+		if !guidance.Content.OfString.Valid() || guidance.Content.OfString.Value != "补充信息：please retry" {
 			t.Fatalf("unexpected guidance content")
 		}
 	})
