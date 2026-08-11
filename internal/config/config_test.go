@@ -2,8 +2,8 @@ package config
 
 import (
 	"path/filepath"
-	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -108,7 +108,7 @@ func TestParseAllowedUserIDs(t *testing.T) {
 		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS")
 
 		want := []int{123, 456, 789}
-		if !reflect.DeepEqual(cfg.Telegram.AllowedUserIDs, want) {
+		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
 			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
 		}
 	})
@@ -120,7 +120,7 @@ func TestParseAllowedUserIDs(t *testing.T) {
 		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS_EMPTY")
 
 		want := []int{1, 2}
-		if !reflect.DeepEqual(cfg.Telegram.AllowedUserIDs, want) {
+		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
 			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
 		}
 	})
@@ -132,7 +132,7 @@ func TestParseAllowedUserIDs(t *testing.T) {
 		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS_INVALID")
 
 		want := []int{9}
-		if !reflect.DeepEqual(cfg.Telegram.AllowedUserIDs, want) {
+		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
 			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
 		}
 	})

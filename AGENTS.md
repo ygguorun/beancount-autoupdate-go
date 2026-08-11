@@ -137,6 +137,12 @@ Follow existing patterns in this repo first; these rules codify observed convent
 - Handle graceful fallbacks where established (e.g., Structured Output -> JSON mode).
 - Preserve compatibility behavior unless task explicitly removes it.
 
+### 4.11 Modern Go syntax
+
+- Prefer `any` over `interface{}`.
+- Use `math/rand/v2` (`rand.IntN`, etc.), not `math/rand`.
+- Prefer `os.ReadFile`/`os.WriteFile` over deprecated `ioutil` APIs.
+
 ## 5) Testing Guidance for New Code
 
 - Prefer table-driven tests for parsing/formatting logic.

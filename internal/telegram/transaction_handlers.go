@@ -2,7 +2,7 @@ package telegram
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"path"
 	"strings"
 	"sync"
@@ -29,7 +29,7 @@ func (b *Bot) ProcessExternalImage(userID int, tempFile string, fileExt string) 
 func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sourceType string, extraContextMessageIDs []int, sourceMessageID int, chatID int64) {
 	logger.Infof("开始处理用户 %d 的图片，文件: %s, 来源: %s", userID, tempFile, sourceType)
 
-	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.Intn(10000))
+	transactionID := fmt.Sprintf("%d_%s_%d", userID, time.Now().Format("20060102150405"), rand.IntN(10000))
 
 	msg := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔍 正在识别图片%s...", sourceType))
 	if sourceMessageID > 0 {
@@ -141,8 +141,8 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 	actualTempWebDAVPath := tempWebDAVPath
 	if uploadResult != "" && b.config.WebDAV.URL != "" {
 		urlPrefix := strings.TrimSuffix(b.config.WebDAV.URL, "/") + "/"
-		if strings.HasPrefix(uploadResult, urlPrefix) {
-			actualTempWebDAVPath = strings.TrimPrefix(uploadResult, urlPrefix)
+		if path, ok := strings.CutPrefix(uploadResult, urlPrefix); ok {
+			actualTempWebDAVPath = path
 		}
 	}
 
@@ -393,8 +393,8 @@ func buildRecordedWebDAVURL(uploadURL string, publicURL string, webdavPath strin
 		trimmedWebDAVPath := strings.Trim(strings.TrimSpace(webdavPath), "/")
 		if trimmedWebDAVPath != "" {
 			prefix := trimmedWebDAVPath + "/"
-			if strings.HasPrefix(pathForRecord, prefix) {
-				pathForRecord = strings.TrimPrefix(pathForRecord, prefix)
+			if path, ok := strings.CutPrefix(pathForRecord, prefix); ok {
+				pathForRecord = path
 			} else if pathForRecord == trimmedWebDAVPath {
 				pathForRecord = ""
 			}

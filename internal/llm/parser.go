@@ -79,14 +79,14 @@ func resolveBaseURLAndProtocol(baseURL string) (string, llmRequestProtocol) {
 	}
 
 	pathWithoutTrailingSlash := strings.TrimSuffix(u.Path, "/")
-	if strings.HasSuffix(pathWithoutTrailingSlash, "/responses") {
-		u.Path = strings.TrimSuffix(pathWithoutTrailingSlash, "/responses")
+	if path, ok := strings.CutSuffix(pathWithoutTrailingSlash, "/responses"); ok {
+		u.Path = path
 		u.RawPath = ""
 		return strings.TrimSuffix(u.String(), "/"), llmRequestProtocolResponses
 	}
 
-	if strings.HasSuffix(pathWithoutTrailingSlash, "/chat/completions") {
-		u.Path = strings.TrimSuffix(pathWithoutTrailingSlash, "/chat/completions")
+	if path, ok := strings.CutSuffix(pathWithoutTrailingSlash, "/chat/completions"); ok {
+		u.Path = path
 		u.RawPath = ""
 		return strings.TrimSuffix(u.String(), "/"), llmRequestProtocolChatCompletions
 	}
@@ -306,10 +306,9 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 
 	// 处理扩展 prompt
 	if p.extendPrompt != "" {
-		parts := strings.SplitN(p.extendPrompt, ":", 2)
-		if len(parts) == 2 {
-			mode := strings.TrimSpace(parts[0])
-			content := strings.TrimSpace(parts[1])
+		if mode, content, ok := strings.Cut(p.extendPrompt, ":"); ok {
+			mode = strings.TrimSpace(mode)
+			content = strings.TrimSpace(content)
 
 			// 处理 \n 转义字符，转换为实际的换行符
 			content = strings.ReplaceAll(content, "\\n", "\n")
@@ -624,24 +623,24 @@ func (p *Parser) updateHistory(history []beancount.ConversationMessage, userProm
 
 // generateTransactionSchema 生成 TransactionData 的 JSON Schema
 func generateTransactionSchema() map[string]any {
-	return map[string]interface{}{
+	return map[string]any{
 		"type":                 "object",
 		"additionalProperties": false,
-		"properties": map[string]interface{}{
+		"properties": map[string]any{
 			"datetime":  map[string]string{"type": "string"},
 			"flag":      map[string]string{"type": "string"},
 			"payee":     map[string]string{"type": "string"},
 			"narration": map[string]string{"type": "string"},
-			"tags": map[string]interface{}{
+			"tags": map[string]any{
 				"type":  "array",
 				"items": map[string]string{"type": "string"},
 			},
-			"postings": map[string]interface{}{
+			"postings": map[string]any{
 				"type": "array",
-				"items": map[string]interface{}{
+				"items": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
-					"properties": map[string]interface{}{
+					"properties": map[string]any{
 						"account":  map[string]string{"type": "string"},
 						"amount":   map[string]string{"type": "string"},
 						"currency": map[string]string{"type": "string"},
@@ -651,19 +650,19 @@ func generateTransactionSchema() map[string]any {
 				},
 			},
 			"order_id": map[string]string{"type": "string"},
-			"extra": map[string]interface{}{
+			"extra": map[string]any{
 				"type": "array",
-				"items": map[string]interface{}{
+				"items": map[string]any{
 					"type":                 "object",
 					"additionalProperties": false,
-					"properties": map[string]interface{}{
+					"properties": map[string]any{
 						"k": map[string]string{"type": "string"},
 						"v": map[string]string{"type": "string"},
 					},
 					"required": []string{"k", "v"},
 				},
 			},
-			"special_directives": map[string]interface{}{
+			"special_directives": map[string]any{
 				"type":  "array",
 				"items": map[string]string{"type": "string"},
 			},

@@ -153,16 +153,16 @@ func TestGenerateTransactionSchema(t *testing.T) {
 		t.Fatalf("root additionalProperties must be false")
 	}
 
-	properties, ok := schema["properties"].(map[string]interface{})
+	properties, ok := schema["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("properties type assertion failed")
 	}
 
-	postings, ok := properties["postings"].(map[string]interface{})
+	postings, ok := properties["postings"].(map[string]any)
 	if !ok {
 		t.Fatalf("postings schema missing")
 	}
-	postingsItems, ok := postings["items"].(map[string]interface{})
+	postingsItems, ok := postings["items"].(map[string]any)
 	if !ok {
 		t.Fatalf("postings items schema missing")
 	}
@@ -170,21 +170,21 @@ func TestGenerateTransactionSchema(t *testing.T) {
 		t.Fatalf("postings item additionalProperties must be false")
 	}
 
-	extra, ok := properties["extra"].(map[string]interface{})
+	extra, ok := properties["extra"].(map[string]any)
 	if !ok {
 		t.Fatalf("extra schema missing")
 	}
 	if extra["type"] != "array" {
 		t.Fatalf("extra type must be array")
 	}
-	extraItems, ok := extra["items"].(map[string]interface{})
+	extraItems, ok := extra["items"].(map[string]any)
 	if !ok {
 		t.Fatalf("extra items schema missing")
 	}
 	if extraItems["additionalProperties"] != false {
 		t.Fatalf("extra item additionalProperties must be false")
 	}
-	extraItemProps, ok := extraItems["properties"].(map[string]interface{})
+	extraItemProps, ok := extraItems["properties"].(map[string]any)
 	if !ok {
 		t.Fatalf("extra item properties missing")
 	}

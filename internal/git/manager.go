@@ -168,21 +168,23 @@ func (m *Manager) getSSHAuth() transport.AuthMethod {
 			line = strings.TrimSpace(line)
 
 			// 检查是否是 github.com 的 Host 块
-			if strings.HasPrefix(line, "Host ") {
-				host := strings.TrimSpace(strings.TrimPrefix(line, "Host "))
+			if hostLine, ok := strings.CutPrefix(line, "Host "); ok {
+				host := strings.TrimSpace(hostLine)
 				if host == "github.com" || host == "*.github.com" {
 					inGitHubHost = true
 					logger.Infof("找到 github.com 配置块")
 				} else {
 					inGitHubHost = false
 				}
-			} else if inGitHubHost && strings.HasPrefix(line, "IdentityFile") {
-				identityFile = strings.TrimSpace(strings.TrimPrefix(line, "IdentityFile"))
-				// 展开波浪号
-				if strings.HasPrefix(identityFile, "~/") {
-					identityFile = filepath.Join(homeDir, identityFile[2:])
+			} else if inGitHubHost {
+				if identityLine, ok := strings.CutPrefix(line, "IdentityFile"); ok {
+					identityFile = strings.TrimSpace(identityLine)
+					// 展开波浪号
+					if rest, ok := strings.CutPrefix(identityFile, "~/"); ok {
+						identityFile = filepath.Join(homeDir, rest)
+					}
+					logger.Infof("找到 IdentityFile: %s", identityFile)
 				}
-				logger.Infof("找到 IdentityFile: %s", identityFile)
 			}
 		}
 

@@ -125,11 +125,11 @@ func (b *Bot) resolveGuidanceTarget(userID int, rawText string, replyTo *tgbotap
 
 func parseGuidanceWithShortID(text string) (string, string, bool) {
 	trimmed := strings.TrimSpace(text)
-	if !strings.HasPrefix(trimmed, "#") {
+	trimmed, ok := strings.CutPrefix(trimmed, "#")
+	if !ok {
 		return "", "", false
 	}
 
-	trimmed = strings.TrimPrefix(trimmed, "#")
 	parts := strings.Fields(trimmed)
 	if len(parts) == 0 {
 		return "", "", true
