@@ -3,6 +3,7 @@ package config
 import (
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,9 @@ func TestGetAbsPath(t *testing.T) {
 	cfg := &Config{projectDir: "/tmp/project"}
 
 	t.Run("absolute path unchanged", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Unix absolute paths have different semantics on Windows")
+		}
 		got := cfg.GetAbsPath("/var/log/app.log")
 		if got != "/var/log/app.log" {
 			t.Fatalf("unexpected path: got %q", got)
