@@ -108,8 +108,12 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	config.setDefaults()
 
-	// 设置项目根目录
-	config.projectDir = filepath.Dir(configPath)
+	// 设置项目根目录：锚定工作目录（部署脚本均 cd 到部署根目录运行）
+	if wd, err := os.Getwd(); err == nil {
+		config.projectDir = wd
+	} else {
+		config.projectDir = filepath.Dir(configPath)
+	}
 
 	// 从环境变量覆盖配置
 	config.loadFromEnv()
