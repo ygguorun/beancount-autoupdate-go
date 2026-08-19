@@ -85,13 +85,13 @@ func (b *Bot) persistSessionState() {
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Dir(b.stateFilePath), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(b.stateFilePath), 0o700); err != nil {
 		logger.Warnf("创建会话状态目录失败: path=%s, err=%v", b.stateFilePath, err)
 		return
 	}
 
 	tempPath := b.stateFilePath + ".tmp"
-	if err := os.WriteFile(tempPath, payload, 0o644); err != nil {
+	if err := os.WriteFile(tempPath, payload, 0o600); err != nil {
 		logger.Warnf("写入会话状态临时文件失败: path=%s, err=%v", tempPath, err)
 		return
 	}

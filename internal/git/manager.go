@@ -274,15 +274,14 @@ func (m *Manager) loadSSHKey(keyPath string) transport.AuthMethod {
 	// 配置 known_hosts
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		logger.Warnf("获取用户主目录失败: %v", err)
-		auth.HostKeyCallback = gossh.InsecureIgnoreHostKey()
+		logger.Errorf("获取用户主目录失败，拒绝使用未校验的 SSH 主机: %v", err)
+		return nil
 	} else {
 		knownHostsPath := filepath.Join(homeDir, ".ssh", "known_hosts")
 		knownHostsCallback, err := ssh.NewKnownHostsCallback(knownHostsPath)
 		if err != nil {
-			logger.Warnf("✗ 无法读取 known_hosts 文件: %v", err)
-			logger.Warnf("使用不安全的 HostKeyCallback（仅用于测试）")
-			auth.HostKeyCallback = gossh.InsecureIgnoreHostKey()
+			logger.Errorf("✗ 无法读取 known_hosts 文件，拒绝使用未校验的 SSH 主机: %v", err)
+			return nil
 		} else {
 			logger.Infof("✓ 使用 known_hosts 文件: %s", knownHostsPath)
 			auth.HostKeyCallback = knownHostsCallback

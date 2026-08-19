@@ -14,6 +14,11 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+const (
+	maxTelegramImageSize = 20 * 1024 * 1024
+	telegramHTTPTimeout  = 30 * time.Second
+)
+
 // handleDocument 处理文档（图片文件）
 func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	document := message.Document
@@ -222,7 +227,7 @@ func (b *Bot) downloadToTempFile(filePath string, prefix string, userID int, ext
 	}
 
 	tempFile := filepath.Join(os.TempDir(), fmt.Sprintf("%s_%d_%d%s", prefix, time.Now().Unix(), userID, ext))
-	if err := os.WriteFile(tempFile, data, 0o644); err != nil {
+	if err := os.WriteFile(tempFile, data, 0o600); err != nil {
 		return "", err
 	}
 
@@ -231,7 +236,8 @@ func (b *Bot) downloadToTempFile(filePath string, prefix string, userID int, ext
 
 func (b *Bot) downloadTelegramFile(filePath string) ([]byte, error) {
 	fileURL := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", b.botAPI.Token, filePath)
-	resp, err := http.Get(fileURL)
+	client := &http.Client{Timeout: telegramHTTPTimeout}
+	resp, err := client.Get(fileURL)
 	if err != nil {
 		return nil, err
 	}
@@ -245,9 +251,12 @@ func (b *Bot) downloadTelegramFile(filePath string) ([]byte, error) {
 		return nil, fmt.Errorf("failed to download file, status: %d", resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxTelegramImageSize+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(data) > maxTelegramImageSize {
+		return nil, fmt.Errorf("downloaded file exceeds %d MB limit", maxTelegramImageSize/(1024*1024))
 	}
 
 	return data, nil

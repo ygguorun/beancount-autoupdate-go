@@ -1,0 +1,11 @@
+config.toml
+.env
+logs/
+tmp/
+temp/
+beancount-data/
+build/
+dist/
+session-*.md
+.git/
+.gitignore

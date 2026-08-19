@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -65,7 +64,6 @@ func (s *Server) handleUploadReceipt(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
-
 	maxBytes := s.cfg.MaxUploadSizeMB * 1024 * 1024
 	r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 	if err := r.ParseMultipartForm(maxBytes); err != nil {
@@ -73,6 +71,11 @@ func (s *Server) handleUploadReceipt(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid multipart form"})
 		return
 	}
+	defer func() {
+		if err := r.MultipartForm.RemoveAll(); err != nil {
+			logger.Warnf("清理 multipart 临时文件失败: %v", err)
+		}
+	}()
 
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -104,12 +107,12 @@ func (s *Server) handleUploadReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tempFilePath := filepath.Join(os.TempDir(), fmt.Sprintf("temp_http_%d%s", time.Now().UnixNano(), ext))
-	output, err := os.Create(tempFilePath)
+	output, err := os.CreateTemp(os.TempDir(), "beancount-http-*"+ext)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to save upload"})
 		return
 	}
+	tempFilePath := output.Name()
 
 	if _, err := io.Copy(output, file); err != nil {
 		if closeErr := output.Close(); closeErr != nil {

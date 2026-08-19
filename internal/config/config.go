@@ -147,7 +147,6 @@ func (c *Config) loadFromEnv() {
 	if apiKey := os.Getenv("LLM_API_KEY"); apiKey != "" {
 		c.LLM.APIKey = apiKey
 	}
-
 	// WebDAV
 	if username := os.Getenv("WEBDAV_USERNAME"); username != "" {
 		c.WebDAV.Username = username
@@ -196,6 +195,10 @@ func (c *Config) Validate() []string {
 		if c.HTTPServer.ListenAddr == "" {
 			errors = append(errors, "HTTP 服务已启用，但 listen_addr 为空，请在 config.toml 中配置 http_server.listen_addr")
 		}
+	}
+
+	if c.WebDAV.Enabled && !c.WebDAV.VerifySSL {
+		errors = append(errors, "WebDAV 已启用，但 verify_ssl=false 会关闭 TLS 证书校验")
 	}
 
 	return errors

@@ -198,8 +198,15 @@ func (p *Parser) ParseWithGuidance(
 // ParseImageFromBytes 从字节数组解析图片
 func (p *Parser) ParseImageFromBytes(imageData []byte, expenseCategories, incomeCategories, transferCategories, accountNames, tagNames []string) (*beancount.TransactionData, error) {
 	// 创建临时文件
-	tempFile := fmt.Sprintf("/tmp/beancount_temp_%d.jpg", time.Now().UnixNano())
-	if err := os.WriteFile(tempFile, imageData, 0o644); err != nil {
+	tempFileHandle, err := os.CreateTemp("", "beancount_temp_*.jpg")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempFile := tempFileHandle.Name()
+	if err := tempFileHandle.Close(); err != nil {
+		return nil, fmt.Errorf("failed to close temp file: %w", err)
+	}
+	if err := os.WriteFile(tempFile, imageData, 0o600); err != nil {
 		return nil, fmt.Errorf("failed to write temp file: %w", err)
 	}
 	defer func() {
