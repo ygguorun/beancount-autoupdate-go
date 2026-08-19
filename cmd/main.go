@@ -209,12 +209,15 @@ func main() {
 	<-sigChan
 
 	logger.Info("收到中断信号，正在关闭...")
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	if ingestServer != nil {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
 		if err := ingestServer.Shutdown(shutdownCtx); err != nil {
 			logger.Warnf("关闭 HTTP 上传服务失败: %v", err)
 		}
+	}
+	if err := bot.Shutdown(shutdownCtx); err != nil {
+		logger.Warnf("关闭 Telegram Bot 失败: %v", err)
 	}
 	logger.Info("Beancount AutoUpdate 已停止")
 }

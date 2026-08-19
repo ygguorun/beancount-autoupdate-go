@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"sync"
@@ -30,6 +31,7 @@ type Bot struct {
 	stateMu         sync.Mutex
 	stateFilePath   string
 	llmSemaphore    chan struct{} // LLM 信号量，控制并发调用
+	runDone         chan struct{}
 }
 
 // NewBot 创建 Telegram Bot
@@ -58,6 +60,7 @@ func NewBot(
 		waitingForInput: make(map[int]map[string]string),
 		stateFilePath:   cfg.GetAbsPath(filepath.Join("tmp", "telegram_sessions.json")),
 		llmSemaphore:    make(chan struct{}, 1), // 限制 LLM 并发为1
+		runDone:         make(chan struct{}),
 	}
 
 	if err := b.loadSessionState(); err != nil {
@@ -65,4 +68,14 @@ func NewBot(
 	}
 
 	return b, nil
+}
+
+func (b *Bot) Shutdown(ctx context.Context) error {
+	b.botAPI.StopReceivingUpdates()
+	select {
+	case <-b.runDone:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

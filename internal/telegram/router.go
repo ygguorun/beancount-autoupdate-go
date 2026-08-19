@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"strings"
+	"sync"
 
 	"beancount-autoupdate/internal/logger"
 
@@ -27,8 +28,13 @@ func (b *Bot) Run() error {
 	workerChan := make(chan tgbotapi.Update, 100)
 
 	// 启动 workers
+	var workerWG sync.WaitGroup
 	for range workerCount {
-		go b.worker(workerChan)
+		workerWG.Add(1)
+		go func() {
+			defer workerWG.Done()
+			b.worker(workerChan)
+		}()
 	}
 
 	// 分发消息到 workers
@@ -39,6 +45,9 @@ func (b *Bot) Run() error {
 			workerChan <- update
 		}
 	}
+	close(workerChan)
+	workerWG.Wait()
+	close(b.runDone)
 
 	return nil
 }

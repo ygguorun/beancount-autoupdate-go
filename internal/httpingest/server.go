@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"beancount-autoupdate/internal/config"
@@ -19,6 +20,7 @@ type Server struct {
 	cfg    config.HTTPServerConfig
 	bot    *telegram.Bot
 	server *http.Server
+	tasks  sync.WaitGroup
 }
 
 func NewServer(cfg config.HTTPServerConfig, bot *telegram.Bot) *Server {
@@ -51,6 +53,16 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	logger.Info("HTTP 上传服务关闭中...")
 	if err := s.server.Shutdown(ctx); err != nil {
 		return fmt.Errorf("http server shutdown failed: %w", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		s.tasks.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return nil
 }
@@ -137,7 +149,9 @@ func (s *Server) handleUploadReceipt(w http.ResponseWriter, r *http.Request) {
 	logger.Infof("收到 HTTP 上传: requestID=%s, filename=%s, contentType=%s, targetUserID=%d",
 		requestID, sanitizeFilename(header.Filename), contentType, s.cfg.TargetUserID)
 
+	s.tasks.Add(1)
 	go func() {
+		defer s.tasks.Done()
 		s.bot.ProcessExternalImage(s.cfg.TargetUserID, tempFilePath, ext)
 	}()
 
