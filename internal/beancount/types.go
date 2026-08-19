@@ -43,9 +43,10 @@ type TransactionData struct {
 
 // ConversationMessage 对话消息（用于 LLM 对话历史）
 type ConversationMessage struct {
-	Role        string `json:"role"`         // "user" 或 "assistant"
-	Content     string `json:"content"`      // 消息内容（文本）
-	ImageBase64 string `json:"image_base64"` // 图片的 base64 编码（仅首次用户消息有）
+	Role          string `json:"role"`         // "user" 或 "assistant"
+	Content       string `json:"content"`      // 消息内容（文本）
+	ImageBase64   string `json:"image_base64"` // 图片的 base64 编码（仅首次用户消息有）
+	ImageMIMEType string `json:"image_mime_type,omitempty"`
 }
 
 // PendingTransaction 待确认的交易

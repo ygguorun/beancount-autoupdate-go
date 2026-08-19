@@ -267,6 +267,17 @@ func TestIsStructuredOutputUnsupported(t *testing.T) {
 	}
 }
 
+func TestImageDataURLPreservesMIMEType(t *testing.T) {
+	got := imageDataURL("image/png", "abc123")
+	if got != "data:image/png;base64,abc123" {
+		t.Fatalf("unexpected image data URL: %q", got)
+	}
+
+	if got := detectImageMIMEType([]byte("not an image")); got != "image/jpeg" {
+		t.Fatalf("unexpected fallback MIME type: %q", got)
+	}
+}
+
 func TestResolveBaseURLAndProtocol(t *testing.T) {
 	tests := []struct {
 		name         string

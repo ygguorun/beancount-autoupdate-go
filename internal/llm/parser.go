@@ -10,6 +10,7 @@ import (
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -109,7 +110,7 @@ func (p *Parser) ParseImageWithHistory(
 	userPromptOverride string,
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	// 编码图片
-	base64Image, err := p.encodeImage(imagePath)
+	base64Image, imageMIMEType, err := p.encodeImage(imagePath)
 	if err != nil {
 		return nil, history, fmt.Errorf("failed to encode image: %w", err)
 	}
@@ -119,7 +120,7 @@ func (p *Parser) ParseImageWithHistory(
 
 	// 构建请求适配层负载
 	// userPromptOverride 作为 currentPrompt 传入，用于引导重试时添加当前用户消息
-	payload := p.buildRequestPayload(prompt, base64Image, history, userPromptOverride)
+	payload := p.buildRequestPayload(prompt, base64Image, imageMIMEType, history, userPromptOverride)
 
 	// 记录 LLM 输入日志
 	logger.Debugf("LLM Input: history_count=%d, has_image=%v, current_prompt_len=%d", len(history), base64Image != "", len(userPromptOverride))
@@ -158,6 +159,7 @@ func (p *Parser) ParseImageWithHistory(
 			history,
 			userPromptForHistory,
 			imageBase64ForHistory,
+			imageMIMEType,
 		)
 	default:
 		// chat/completions 保持现有行为：先 Structured Outputs，再降级 JSON mode
@@ -166,14 +168,16 @@ func (p *Parser) ParseImageWithHistory(
 			history,
 			userPromptForHistory,
 			imageBase64ForHistory,
+			imageMIMEType,
 		)
-		if err != nil {
+		if err != nil && isStructuredOutputUnsupported(err) {
 			logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
 			transactionData, newHistory, err = p.callWithJSONMode(
 				payload.chatMessages,
 				history,
 				userPromptForHistory,
 				imageBase64ForHistory,
+				imageMIMEType,
 			)
 		}
 	}
@@ -219,16 +223,17 @@ func (p *Parser) ParseImageFromBytes(imageData []byte, expenseCategories, income
 }
 
 // encodeImage 将图片编码为 base64，如果超过尺寸限制则进行压缩
-func (p *Parser) encodeImage(imagePath string) (string, error) {
+func (p *Parser) encodeImage(imagePath string) (string, string, error) {
 	// 读取原始图片数据
 	data, err := os.ReadFile(imagePath)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
+	imageMIMEType := detectImageMIMEType(data)
 
 	// 如果没有尺寸限制，直接返回原始数据
 	if p.maxImageSize <= 0 {
-		return base64.StdEncoding.EncodeToString(data), nil
+		return base64.StdEncoding.EncodeToString(data), imageMIMEType, nil
 	}
 
 	// 解码图片获取尺寸
@@ -236,7 +241,7 @@ func (p *Parser) encodeImage(imagePath string) (string, error) {
 	if err != nil {
 		// 如果解码失败，可能是格式不支持，直接返回原始数据
 		logger.Warnf("无法解码图片 %s: %v，将使用原始图片", imagePath, err)
-		return base64.StdEncoding.EncodeToString(data), nil
+		return base64.StdEncoding.EncodeToString(data), imageMIMEType, nil
 	}
 
 	bounds := img.Bounds()
@@ -246,7 +251,7 @@ func (p *Parser) encodeImage(imagePath string) (string, error) {
 	// 检查是否需要压缩
 	if width <= p.maxImageSize && height <= p.maxImageSize {
 		logger.Debugf("图片尺寸 %dx%d 在限制范围内，无需压缩", width, height)
-		return base64.StdEncoding.EncodeToString(data), nil
+		return base64.StdEncoding.EncodeToString(data), imageMIMEType, nil
 	}
 
 	// 计算缩放后的尺寸（保持宽高比）
@@ -268,15 +273,30 @@ func (p *Parser) encodeImage(imagePath string) (string, error) {
 	var buf bytes.Buffer
 	if format == "png" {
 		if err := imaging.Encode(&buf, resized, imaging.PNG); err != nil {
-			return "", fmt.Errorf("failed to encode resized image as PNG: %w", err)
+			return "", "", fmt.Errorf("failed to encode resized image as PNG: %w", err)
 		}
 	} else {
 		if err := imaging.Encode(&buf, resized, imaging.JPEG, imaging.JPEGQuality(90)); err != nil {
-			return "", fmt.Errorf("failed to encode resized image as JPEG: %w", err)
+			return "", "", fmt.Errorf("failed to encode resized image as JPEG: %w", err)
 		}
 	}
 
-	return base64.StdEncoding.EncodeToString(buf.Bytes()), nil
+	if format == "png" {
+		imageMIMEType = "image/png"
+	} else {
+		imageMIMEType = "image/jpeg"
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes()), imageMIMEType, nil
+}
+
+func detectImageMIMEType(data []byte) string {
+	detected := http.DetectContentType(data)
+	switch detected {
+	case "image/jpeg", "image/png", "image/gif", "image/webp":
+		return detected
+	default:
+		return "image/jpeg"
+	}
 }
 
 // buildPrompt 构建 LLM 提示词
@@ -346,7 +366,8 @@ func (p *Parser) buildPrompt(accountNames, tagNames []string) string {
 
 // buildMessages 构建 OpenAI API 消息列表
 // currentPrompt 用于引导重试时添加当前用户消息
-func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) []openai.ChatCompletionMessageParamUnion {
+func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string, imageMIMETypes ...string) []openai.ChatCompletionMessageParamUnion {
+	imageMIMEType := firstImageMIMEType(imageMIMETypes...)
 	var messages []openai.ChatCompletionMessageParamUnion
 
 	// 如果历史为空，使用 prompt 和 base64Image 构建新消息（第一次识别）
@@ -356,7 +377,7 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 			content := []openai.ChatCompletionContentPartUnionParam{
 				openai.TextContentPart(prompt),
 				openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-					URL: fmt.Sprintf("data:image/jpeg;base64,%s", base64Image),
+					URL: imageDataURL(imageMIMEType, base64Image),
 				}),
 			}
 			messages = append(messages, openai.UserMessage(content))
@@ -371,12 +392,13 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 		switch msg.Role {
 		case "user":
 			content := formatGuidanceForLLM(msg.Content)
+			messageMIMEType := msg.ImageMIMEType
 			// 如果历史消息包含图片，构建包含图片的用户消息
 			if msg.ImageBase64 != "" {
 				content := []openai.ChatCompletionContentPartUnionParam{
 					openai.TextContentPart(content),
 					openai.ImageContentPart(openai.ChatCompletionContentPartImageImageURLParam{
-						URL: fmt.Sprintf("data:image/jpeg;base64,%s", msg.ImageBase64),
+						URL: imageDataURL(messageMIMEType, msg.ImageBase64),
 					}),
 				}
 				messages = append(messages, openai.UserMessage(content))
@@ -401,19 +423,19 @@ type parserRequestPayload struct {
 	responseInput responses.ResponseInputParam
 }
 
-func (p *Parser) buildRequestPayload(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) parserRequestPayload {
+func (p *Parser) buildRequestPayload(prompt, base64Image, imageMIMEType string, history []beancount.ConversationMessage, currentPrompt string) parserRequestPayload {
 	return parserRequestPayload{
-		chatMessages:  p.buildMessages(prompt, base64Image, history, currentPrompt),
-		responseInput: p.buildResponseInput(prompt, base64Image, history, currentPrompt),
+		chatMessages:  p.buildMessages(prompt, base64Image, history, currentPrompt, imageMIMEType),
+		responseInput: p.buildResponseInput(prompt, base64Image, history, currentPrompt, imageMIMEType),
 	}
 }
 
-func (p *Parser) buildResponseInput(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string) responses.ResponseInputParam {
+func (p *Parser) buildResponseInput(prompt, base64Image string, history []beancount.ConversationMessage, currentPrompt string, imageMIMETypes ...string) responses.ResponseInputParam {
 	input := responses.ResponseInputParam{}
 
 	// 如果历史为空，使用 prompt 和 base64Image 构建新消息（第一次识别）
 	if len(history) == 0 {
-		input = append(input, buildResponsesUserMessage(prompt, base64Image))
+		input = append(input, buildResponsesUserMessage(prompt, base64Image, firstImageMIMEType(imageMIMETypes...)))
 		return input
 	}
 
@@ -421,7 +443,7 @@ func (p *Parser) buildResponseInput(prompt, base64Image string, history []beanco
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
-			input = append(input, buildResponsesUserMessage(formatGuidanceForLLM(msg.Content), msg.ImageBase64))
+			input = append(input, buildResponsesUserMessage(formatGuidanceForLLM(msg.Content), msg.ImageBase64, msg.ImageMIMEType))
 		case "assistant":
 			input = append(input, responses.ResponseInputItemParamOfMessage(msg.Content, responses.EasyInputMessageRoleAssistant))
 		}
@@ -435,7 +457,7 @@ func (p *Parser) buildResponseInput(prompt, base64Image string, history []beanco
 	return input
 }
 
-func buildResponsesUserMessage(content, imageBase64 string) responses.ResponseInputItemUnionParam {
+func buildResponsesUserMessage(content, imageBase64 string, imageMIMETypes ...string) responses.ResponseInputItemUnionParam {
 	if imageBase64 == "" {
 		return responses.ResponseInputItemParamOfMessage(content, responses.EasyInputMessageRoleUser)
 	}
@@ -445,7 +467,7 @@ func buildResponsesUserMessage(content, imageBase64 string) responses.ResponseIn
 		{
 			OfInputImage: &responses.ResponseInputImageParam{
 				Detail:   responses.ResponseInputImageDetailAuto,
-				ImageURL: openai.String(fmt.Sprintf("data:image/jpeg;base64,%s", imageBase64)),
+				ImageURL: openai.String(imageDataURL(firstImageMIMEType(imageMIMETypes...), imageBase64)),
 			},
 		},
 	}
@@ -462,10 +484,22 @@ func formatGuidanceForLLM(content string) string {
 	return llmGuidancePrefix + content
 }
 
+func firstImageMIMEType(types ...string) string {
+	if len(types) > 0 && types[0] != "" {
+		return types[0]
+	}
+	return "image/jpeg"
+}
+
+func imageDataURL(mimeType, base64Image string) string {
+	return fmt.Sprintf("data:%s;base64,%s", firstImageMIMEType(mimeType), base64Image)
+}
+
 func (p *Parser) callWithResponsesStructuredOutput(
 	input responses.ResponseInputParam,
 	history []beancount.ConversationMessage,
 	prompt, imageBase64 string,
+	imageMIMEType string,
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
@@ -502,7 +536,7 @@ func (p *Parser) callWithResponsesStructuredOutput(
 		return nil, history, err
 	}
 
-	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
 	return transactionData, newHistory, nil
 }
 
@@ -511,6 +545,7 @@ func (p *Parser) callWithStructuredOutput(
 	messages []openai.ChatCompletionMessageParamUnion,
 	history []beancount.ConversationMessage,
 	prompt, imageBase64 string,
+	imageMIMEType string,
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
@@ -537,6 +572,9 @@ func (p *Parser) callWithStructuredOutput(
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
 
+	if len(completion.Choices) == 0 {
+		return nil, history, fmt.Errorf("empty choices in LLM response")
+	}
 	content := completion.Choices[0].Message.Content
 	if content == "" {
 		return nil, history, fmt.Errorf("empty response from LLM")
@@ -557,7 +595,7 @@ func (p *Parser) callWithStructuredOutput(
 	}
 
 	// 更新历史（保存用户提示词、图片和助手响应）
-	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
 
 	return transactionData, newHistory, nil
 }
@@ -567,6 +605,7 @@ func (p *Parser) callWithJSONMode(
 	messages []openai.ChatCompletionMessageParamUnion,
 	history []beancount.ConversationMessage,
 	prompt, imageBase64 string,
+	imageMIMEType string,
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
@@ -582,6 +621,9 @@ func (p *Parser) callWithJSONMode(
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
 
+	if len(completion.Choices) == 0 {
+		return nil, history, fmt.Errorf("empty choices in LLM response")
+	}
 	content := completion.Choices[0].Message.Content
 	if content == "" {
 		return nil, history, fmt.Errorf("empty response from LLM")
@@ -596,7 +638,7 @@ func (p *Parser) callWithJSONMode(
 		return nil, history, err
 	}
 
-	newHistory := p.updateHistory(history, prompt, imageBase64, content)
+	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
 	return transactionData, newHistory, nil
 }
 
@@ -611,13 +653,14 @@ func isStructuredOutputUnsupported(err error) bool {
 }
 
 // updateHistory 更新对话历史
-func (p *Parser) updateHistory(history []beancount.ConversationMessage, userPrompt, imageBase64, assistantResponse string) []beancount.ConversationMessage {
+func (p *Parser) updateHistory(history []beancount.ConversationMessage, userPrompt, imageBase64, imageMIMEType, assistantResponse string) []beancount.ConversationMessage {
 	// 先添加用户消息（保存文本提示词和图片）
 	if userPrompt != "" {
 		history = append(history, beancount.ConversationMessage{
-			Role:        "user",
-			Content:     userPrompt,
-			ImageBase64: imageBase64,
+			Role:          "user",
+			Content:       userPrompt,
+			ImageBase64:   imageBase64,
+			ImageMIMEType: imageMIMEType,
 		})
 	}
 	// 再添加助手响应
