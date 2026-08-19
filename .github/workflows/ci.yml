@@ -21,6 +21,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
+      - name: Verify module files
+        run: go mod tidy -diff
+
       - name: Verify formatting
         run: |
           unformatted=$(gofmt -l .)
@@ -32,3 +35,12 @@ jobs:
 
       - name: Run tests
         run: go test -v ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Run race tests
+        run: go test -race ./...
+
+      - name: Build
+        run: go build ./cmd/main.go

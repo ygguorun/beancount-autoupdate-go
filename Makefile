@@ -64,7 +64,7 @@ build-all:
 		echo "构建 $(platform)..."; \
 		GOOS=$(word 1,$(subst /, ,$(platform))) \
 		GOARCH=$(word 2,$(subst /, ,$(platform))) \
-		$(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(APP_NAME)-$(platform) $(CMD_DIR)/main.go; \
+		$(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(APP_NAME)-$(subst /,-,$(platform))$(if $(findstring windows,$(platform)),.exe,) $(CMD_DIR)/main.go || exit $$?; \
 	)
 
 # 测试

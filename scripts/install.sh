@@ -137,7 +137,7 @@ timeout = 120
 
 [telegram]
 token = ""
-allowed_users = []
+allowed_user_ids = []
 
 [webdav]
 enabled = false

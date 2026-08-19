@@ -1,6 +1,6 @@
 # 多阶段构建 Dockerfile
 # 第一阶段：构建
-FROM golang:1.23-alpine AS builder
+FROM golang:1.24-alpine AS builder
 
 # 安装必要的工具
 RUN apk add --no-cache git ca-certificates tzdata
@@ -18,10 +18,10 @@ RUN go mod download
 COPY . .
 
 # 构建应用
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-w -s" -o beancount-autoupdate ./cmd/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" -o beancount-autoupdate ./cmd/main.go
 
 # 第二阶段：运行
-FROM alpine:latest
+FROM alpine:3.22
 
 # 安装 ca-certificates 和 tzdata
 RUN apk --no-cache add ca-certificates tzdata git
@@ -50,8 +50,8 @@ RUN mkdir -p beancount-data logs && \
 # 切换到非 root 用户
 USER appuser
 
-# 暴露端口（如果需要）
-# EXPOSE 8080
+# HTTP 上传服务使用的默认端口
+EXPOSE 8080
 
 # 运行应用
 CMD ["./beancount-autoupdate"]
