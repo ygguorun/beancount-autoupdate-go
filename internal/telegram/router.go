@@ -117,8 +117,15 @@ func (b *Bot) handleCommand(message *tgbotapi.Message) {
 // handleCallback 处理回调查询
 func (b *Bot) handleCallback(update tgbotapi.Update) {
 	query := update.CallbackQuery
+	if query == nil || query.From == nil {
+		return
+	}
 	userID := int(query.From.ID)
 	callbackData := query.Data
+	if !b.config.IsUserAllowed(userID) {
+		b.sendMessageWithNilKeyboard(userID, "❌ 您没有权限使用此机器人")
+		return
+	}
 
 	logger.Infof("收到回调: userID=%d, callbackData=%s", userID, callbackData)
 
@@ -162,6 +169,11 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 
 	b.mu.RLock()
 	data, ok := b.pendingTx[userID][transactionID]
+	if ok && data != nil {
+		data = clonePendingTransaction(data)
+	} else {
+		ok = false
+	}
 	b.mu.RUnlock()
 
 	if !ok {
@@ -180,9 +192,17 @@ func (b *Bot) handleCallback(update tgbotapi.Update) {
 	case "cancel":
 		b.cancelTransaction(userID, transactionID)
 	case "rerun_recognition":
-		b.rerunRecognition(userID, transactionID, query.Message.MessageID)
+		messageID := 0
+		if query.Message != nil {
+			messageID = query.Message.MessageID
+		}
+		b.rerunRecognition(userID, transactionID, messageID)
 	case "guided_retry":
-		b.startGuidedRetry(userID, transactionID, query.Message.MessageID)
+		messageID := 0
+		if query.Message != nil {
+			messageID = query.Message.MessageID
+		}
+		b.startGuidedRetry(userID, transactionID, messageID)
 	default:
 		logger.Warnf("未知回调操作: userID=%d, transactionID=%s, action=%s", userID, transactionID, action)
 		b.sendMessageWithNilKeyboard(userID, "⚠️ 该操作已失效，请重新发送图片或使用 /pending 查看待处理交易")

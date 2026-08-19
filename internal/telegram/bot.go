@@ -24,7 +24,8 @@ type Bot struct {
 	webdavMgr       *webdav.Manager
 	botAPI          *tgbotapi.BotAPI
 	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
-	waitingForInput map[int]map[string]string                        // userID -> transactionID -> inputType
+	confirmingTx    map[int]map[string]struct{}
+	waitingForInput map[int]map[string]string // userID -> transactionID -> inputType
 	mu              sync.RWMutex
 	stateMu         sync.Mutex
 	stateFilePath   string

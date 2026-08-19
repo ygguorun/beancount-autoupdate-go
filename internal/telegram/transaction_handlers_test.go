@@ -1,6 +1,37 @@
 package telegram
 
-import "testing"
+import (
+	"testing"
+
+	"beancount-autoupdate/internal/beancount"
+)
+
+func TestConfirmationReservationIsExclusive(t *testing.T) {
+	b := &Bot{
+		pendingTx: map[int]map[string]*beancount.PendingTransaction{
+			1001: {
+				"tx_1": {TransactionID: "tx_1", Tags: []string{"food"}},
+			},
+		},
+	}
+
+	first, ok := b.beginConfirmation(1001, "tx_1")
+	if !ok || first == nil {
+		t.Fatal("first confirmation reservation should succeed")
+	}
+	first.Tags[0] = "changed"
+
+	if _, ok := b.beginConfirmation(1001, "tx_1"); ok {
+		t.Fatal("second confirmation reservation should be rejected")
+	}
+	b.endConfirmation(1001, "tx_1")
+
+	third, ok := b.beginConfirmation(1001, "tx_1")
+	if !ok || third.Tags[0] != "food" {
+		t.Fatalf("reservation should be reusable with an unchanged snapshot: %#v", third)
+	}
+	b.endConfirmation(1001, "tx_1")
+}
 
 func TestBuildRecordedWebDAVURL(t *testing.T) {
 	tests := []struct {

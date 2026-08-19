@@ -1,13 +1,69 @@
 package telegram
 
 import (
+	"maps"
 	"os"
+	"slices"
 
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/logger"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+func (b *Bot) beginConfirmation(userID int, transactionID string) (*beancount.PendingTransaction, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	data, ok := b.pendingTx[userID][transactionID]
+	if !ok || data == nil {
+		return nil, false
+	}
+	if b.confirmingTx == nil {
+		b.confirmingTx = make(map[int]map[string]struct{})
+	}
+	if b.confirmingTx[userID] == nil {
+		b.confirmingTx[userID] = make(map[string]struct{})
+	}
+	if _, exists := b.confirmingTx[userID][transactionID]; exists {
+		return nil, false
+	}
+
+	b.confirmingTx[userID][transactionID] = struct{}{}
+	return clonePendingTransaction(data), true
+}
+
+func (b *Bot) endConfirmation(userID int, transactionID string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if txMap := b.confirmingTx[userID]; txMap != nil {
+		delete(txMap, transactionID)
+		if len(txMap) == 0 {
+			delete(b.confirmingTx, userID)
+		}
+	}
+}
+
+func (b *Bot) confirmationInProgress(userID int, transactionID string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	_, ok := b.confirmingTx[userID][transactionID]
+	return ok
+}
+
+func clonePendingTransaction(source *beancount.PendingTransaction) *beancount.PendingTransaction {
+	clone := *source
+	clone.Tags = slices.Clone(source.Tags)
+	clone.Postings = slices.Clone(source.Postings)
+	clone.Extra = maps.Clone(source.Extra)
+	clone.AvailableAccounts = slices.Clone(source.AvailableAccounts)
+	clone.PreviousMessageIDs = slices.Clone(source.PreviousMessageIDs)
+	clone.SpecialDirectives = slices.Clone(source.SpecialDirectives)
+	clone.ConversationContextMessageIDs = slices.Clone(source.ConversationContextMessageIDs)
+	clone.ConversationHistory = slices.Clone(source.ConversationHistory)
+	return &clone
+}
 
 // sendReply 发送回复消息
 func (b *Bot) sendReply(message *tgbotapi.Message, text string) {

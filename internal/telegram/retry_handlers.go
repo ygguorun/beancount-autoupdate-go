@@ -258,6 +258,10 @@ type pendingHintItem struct {
 // rerunRecognition 重新识别图片
 func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) {
 	logger.Infof("重新识别: userID=%d, transactionID=%s, messageID=%d", userID, transactionID, messageID)
+	if b.confirmationInProgress(userID, transactionID) {
+		b.sendMessageWithNilKeyboard(userID, "⏳ 该交易正在处理中，请稍候")
+		return
+	}
 
 	b.mu.RLock()
 	data, ok := b.pendingTx[userID][transactionID]
@@ -383,6 +387,10 @@ func (b *Bot) sendRetryErrorKeyboard(userID int, transactionID string) {
 // startGuidedRetry 开始引导重试流程
 func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) {
 	logger.Infof("开始引导重试: userID=%d, transactionID=%s", userID, transactionID)
+	if b.confirmationInProgress(userID, transactionID) {
+		b.sendMessageWithNilKeyboard(userID, "⏳ 该交易正在处理中，请稍候")
+		return
+	}
 
 	b.mu.Lock()
 	if b.waitingForInput[userID] == nil {
@@ -428,6 +436,10 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 // handleGuidanceInput 处理引导输入
 func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance string) {
 	logger.Infof("处理引导输入: userID=%d, transactionID=%s, guidance=%s", userID, transactionID, guidance)
+	if b.confirmationInProgress(userID, transactionID) {
+		b.sendMessageWithNilKeyboard(userID, "⏳ 该交易正在处理中，请稍候")
+		return
+	}
 
 	b.mu.RLock()
 	data, ok := b.pendingTx[userID][transactionID]

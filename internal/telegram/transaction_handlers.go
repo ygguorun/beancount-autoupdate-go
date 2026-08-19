@@ -234,15 +234,17 @@ func (b *Bot) sendRecognitionErrorKeyboard(userID int, transactionID string, rep
 func (b *Bot) confirmTransaction(userID int, transactionID string) {
 	logger.Infof("确认交易: userID=%d, transactionID=%s", userID, transactionID)
 
-	b.mu.Lock()
-	data, ok := b.pendingTx[userID][transactionID]
+	data, ok := b.beginConfirmation(userID, transactionID)
 	if !ok {
-		b.mu.Unlock()
+		if b.confirmationInProgress(userID, transactionID) {
+			b.sendMessageWithNilKeyboard(userID, "⏳ 该交易正在处理中，请稍候")
+			return
+		}
 		logger.Warnf("用户 %d 没有待确认的交易 %s（在 confirmTransaction 中）", userID, transactionID)
 		b.sendMessageWithNilKeyboard(userID, "❌ 没有待确认的交易")
 		return
 	}
-	b.mu.Unlock()
+	defer b.endConfirmation(userID, transactionID)
 
 	finalImageURL := data.TempImageURL
 	if data.TempImageURL != "" && b.webdavMgr != nil {
@@ -313,47 +315,39 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		return
 	}
 
-	go func() {
-		logger.Infof("开始 Git 操作...")
-		logger.Infof("AutoCommit: %v, AutoPush: %v", b.config.Git.AutoCommit, b.config.Git.AutoPush)
+	var gitErr error
+	logger.Infof("开始 Git 操作...")
+	logger.Infof("AutoCommit: %v, AutoPush: %v", b.config.Git.AutoCommit, b.config.Git.AutoPush)
+	if b.config.Git.AutoCommit {
+		commitMessage := fmt.Sprintf("%s %s", b.config.Git.CommitMessagePrefix, data.Narration)
+		logger.Infof("执行 Git 提交: %s", commitMessage)
 
-		if b.config.Git.AutoCommit {
-			commitMessage := fmt.Sprintf("%s %s", b.config.Git.CommitMessagePrefix, data.Narration)
-			logger.Infof("执行 Git 提交: %s", commitMessage)
-
-			if committed, err := b.gitMgr.CommitChanges(commitMessage); err != nil {
-				logger.Errorf("Git 提交失败: %v", err)
-			} else if committed {
-				logger.Infof("Git 提交成功")
-			} else {
-				logger.Infof("没有更改需要提交")
-			}
-
-			if b.config.Git.AutoPush {
-				logger.Infof("执行 Git 推送...")
-				if pushed, err := b.gitMgr.PushChanges(); err != nil {
-					logger.Errorf("Git 推送失败: %v", err)
-				} else if pushed {
-					logger.Infof("Git 推送成功")
-				} else {
-					logger.Infof("没有更改需要推送")
-				}
-			}
-		} else {
-			logger.Infof("Git 自动提交已禁用")
+		if committed, err := b.gitMgr.CommitChanges(commitMessage); err != nil {
+			gitErr = fmt.Errorf("Git 提交失败: %w", err)
+		} else if committed {
+			logger.Infof("Git 提交成功")
 		}
 
-		logger.Infof("Git 操作完成")
-	}()
+		if gitErr == nil && b.config.Git.AutoPush {
+			logger.Infof("执行 Git 推送...")
+			if pushed, err := b.gitMgr.PushChanges(); err != nil {
+				gitErr = fmt.Errorf("Git 推送失败: %w", err)
+			} else if pushed {
+				logger.Infof("Git 推送成功")
+			}
+		}
+	} else {
+		logger.Infof("Git 自动提交已禁用")
+	}
+	if gitErr != nil {
+		logger.Errorf("Git 操作失败: %v", gitErr)
+	}
+
+	b.cleanupTransactionMessages(userID, transactionID, data, false, true)
 
 	b.mu.Lock()
-	data, ok = b.pendingTx[userID][transactionID]
+	_, ok = b.pendingTx[userID][transactionID]
 	if ok {
-		logger.Infof("确认交易，开始清理: transactionID=%s, PreviousMessageIDs=%v, OriginalMessageID=%d, SourceImageMessageID=%d, ConversationContextMessageIDs=%v",
-			transactionID, data.PreviousMessageIDs, data.OriginalMessageID, data.SourceImageMessageID, data.ConversationContextMessageIDs)
-
-		b.cleanupTransactionMessages(userID, transactionID, data, false, true)
-
 		delete(b.pendingTx[userID], transactionID)
 		logger.Infof("已从 pendingTx 中删除交易: transactionID=%s", transactionID)
 
@@ -373,6 +367,10 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		data.Date,
 		maskPayee(data.Payee),
 	)
+	if gitErr != nil {
+		response = fmt.Sprintf("⚠️ 交易已写入本地账本，但 Git 同步失败\n\n🆔 交易ID: %s\n📅 日期: %s\n🏷️ 对象: %s\n\n请检查日志并手动同步 Git。",
+			shortTransactionID(transactionID), data.Date, maskPayee(data.Payee))
+	}
 	b.sendMessageWithNilKeyboard(userID, response)
 }
 
@@ -411,6 +409,10 @@ func buildRecordedWebDAVURL(uploadURL string, publicURL string, webdavPath strin
 // cancelTransaction 取消交易
 func (b *Bot) cancelTransaction(userID int, transactionID string) {
 	logger.Infof("取消交易: userID=%d, transactionID=%s", userID, transactionID)
+	if b.confirmationInProgress(userID, transactionID) {
+		b.sendMessageWithNilKeyboard(userID, "⏳ 该交易正在处理中，请稍候")
+		return
+	}
 
 	b.mu.Lock()
 	data, ok := b.pendingTx[userID][transactionID]
