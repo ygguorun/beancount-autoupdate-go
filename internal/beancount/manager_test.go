@@ -153,3 +153,45 @@ func TestAddTransactionFromPostingsDiscountPairRule(t *testing.T) {
 		})
 	}
 }
+
+func TestAddTransactionEscapesTextAndRejectsInjection(t *testing.T) {
+	m := &Manager{beansDir: filepath.Join(t.TempDir(), "beans"), operatingCurrency: "CNY"}
+	date := time.Date(2026, time.March, 1, 10, 0, 0, 0, time.Local)
+
+	entry, err := m.AddTransactionFromPostings(date, "*", `Shop "A"`, `Line \ note`, nil,
+		[]PostingData{{Account: "Assets:Cash", Amount: "-10.00"}}, "", "", nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(entry, `"Shop \"A\"" "Line \\ note"`) {
+		t.Fatalf("transaction text was not escaped: %s", entry)
+	}
+
+	if _, err := m.AddTransactionFromPostings(date, "*", "Shop\n2026-03-01 *", "note", nil,
+		[]PostingData{{Account: "Assets:Cash", Amount: "-10.00"}}, "", "", nil); err == nil {
+		t.Fatal("expected newline injection to be rejected")
+	}
+}
+
+func TestAddTransactionWithDirectivesWithoutDirectivesDoesNotDeadlock(t *testing.T) {
+	m := &Manager{beansDir: filepath.Join(t.TempDir(), "beans"), operatingCurrency: "CNY"}
+	result := make(chan error, 1)
+	go func() {
+		_, err := m.AddTransactionWithDirectives(&TransactionData{
+			DateTime:  "2026-03-01 10:00:00",
+			Flag:      "*",
+			Narration: "Test",
+			Postings:  []PostingData{{Account: "Assets:Cash", Amount: "-10.00"}},
+		})
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("AddTransactionWithDirectives deadlocked")
+	}
+}

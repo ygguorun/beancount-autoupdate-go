@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -265,6 +266,10 @@ func (m *Manager) parseAccountFile(accountType AccountType) []string {
 
 // AddTransactionFromPostings 从分录列表添加交易记录
 func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narration string, tags []string, postings []PostingData, orderID, imageURL string, extra map[string]string) (string, error) {
+	if err := validateTransactionInput(flag, payee, narration, tags, postings, orderID, imageURL, extra); err != nil {
+		return "", err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -275,9 +280,9 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 
 	// 构建交易条目头部
 	if payee != "" {
-		fmt.Fprintf(&builder, "%s %s \"%s\" \"%s\"", dateStr, flag, payee, narration)
+		fmt.Fprintf(&builder, "%s %s \"%s\" \"%s\"", dateStr, flag, escapeString(payee), escapeString(narration))
 	} else {
-		fmt.Fprintf(&builder, "%s %s \"%s\"", dateStr, flag, narration)
+		fmt.Fprintf(&builder, "%s %s \"%s\"", dateStr, flag, escapeString(narration))
 	}
 
 	// 添加标签
@@ -293,10 +298,10 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 
 	// 添加订单相关元数据
 	if orderID != "" {
-		fmt.Fprintf(&builder, "  order-id: \"%s\"\n", orderID)
+		fmt.Fprintf(&builder, "  order-id: \"%s\"\n", escapeString(orderID))
 	}
 	if imageURL != "" {
-		fmt.Fprintf(&builder, "  image-url: \"%s\"\n", imageURL)
+		fmt.Fprintf(&builder, "  image-url: \"%s\"\n", escapeString(imageURL))
 	}
 
 	// 添加 extra 字段（包括 discount 和 original_amount）
@@ -304,7 +309,13 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 	hasDiscount := extra["discount"] != ""
 	hasOriginalAmount := extra["original_amount"] != ""
 
-	for key, value := range extra {
+	keys := make([]string, 0, len(extra))
+	for key := range extra {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		value := extra[key]
 		if value == "" {
 			continue
 		}
@@ -314,12 +325,12 @@ func (m *Manager) AddTransactionFromPostings(date time.Time, flag, payee, narrat
 			// 只有当两个字段都存在时才添加
 			if hasDiscount && hasOriginalAmount {
 				metadataKey := strings.ReplaceAll(key, "_", "-")
-				fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, value)
+				fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, escapeString(value))
 			}
 		} else {
 			// 其他字段正常处理
 			metadataKey := strings.ReplaceAll(key, "_", "-")
-			fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, value)
+			fmt.Fprintf(&builder, "  %s: \"%s\"\n", metadataKey, escapeString(value))
 		}
 	}
 
@@ -381,9 +392,6 @@ func (m *Manager) appendToFile(filePath, content string) error {
 
 // AddTransactionWithDirectives 添加包含特殊指令的交易记录
 func (m *Manager) AddTransactionWithDirectives(transaction *TransactionData) (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// 解析日期时间
 	date, err := time.Parse("2006-01-02 15:04:05", transaction.DateTime)
 	if err != nil {
@@ -394,6 +402,13 @@ func (m *Manager) AddTransactionWithDirectives(transaction *TransactionData) (st
 
 	// 如果有特殊指令，只添加特殊指令，不添加基础交易条目
 	if len(transaction.SpecialDirectives) > 0 {
+		if err := validateDirectives(transaction.SpecialDirectives); err != nil {
+			return "", err
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
 		// 添加特殊指令
 		for _, directive := range transaction.SpecialDirectives {
 			builder.WriteString(directive)
@@ -435,4 +450,49 @@ func (m *Manager) AddTransactionWithDirectives(transaction *TransactionData) (st
 	}
 
 	return entry, nil
+}
+
+var metadataKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
+func validateTransactionInput(flag, payee, narration string, tags []string, postings []PostingData, orderID, imageURL string, extra map[string]string) error {
+	if strings.TrimSpace(flag) == "" || strings.ContainsAny(flag, "\r\n \t") {
+		return fmt.Errorf("invalid transaction flag")
+	}
+	for _, value := range []string{payee, narration, orderID, imageURL} {
+		if strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("transaction text cannot contain newlines")
+		}
+	}
+	for _, tag := range tags {
+		if tag == "" || strings.ContainsAny(tag, "\r\n \t") {
+			return fmt.Errorf("invalid tag %q", tag)
+		}
+	}
+	for _, posting := range postings {
+		if posting.Account == "" || strings.ContainsAny(posting.Account, "\r\n \t") ||
+			strings.ContainsAny(posting.Amount, "\r\n \t") || strings.ContainsAny(posting.Currency, "\r\n \t") ||
+			strings.ContainsAny(posting.Flag, "\r\n \t") {
+			return fmt.Errorf("invalid posting")
+		}
+	}
+	for key, value := range extra {
+		if !metadataKeyPattern.MatchString(key) || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("invalid metadata")
+		}
+	}
+	return nil
+}
+
+func validateDirectives(directives []string) error {
+	for _, directive := range directives {
+		if strings.TrimSpace(directive) == "" || strings.ContainsAny(directive, "\r\n") {
+			return fmt.Errorf("invalid special directive")
+		}
+	}
+	return nil
+}
+
+func escapeString(value string) string {
+	value = strings.ReplaceAll(value, `\`, `\\`)
+	return strings.ReplaceAll(value, `"`, `\"`)
 }
