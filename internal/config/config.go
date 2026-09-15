@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
 	"beancount-autoupdate/internal/logger"
 
@@ -156,11 +154,6 @@ func (c *Config) loadFromEnv() {
 	}
 }
 
-// GetProjectDir 获取项目根目录
-func (c *Config) GetProjectDir() string {
-	return c.projectDir
-}
-
 // GetAbsPath 获取相对于项目根目录的绝对路径
 func (c *Config) GetAbsPath(path string) string {
 	if filepath.IsAbs(path) {
@@ -215,20 +208,4 @@ func (c *Config) IsUserAllowed(userID int) bool {
 		}
 	}
 	return false
-}
-
-// ParseAllowedUserIDs 解析允许的用户 ID 列表
-func (c *Config) ParseAllowedUserIDs(envVar string) {
-	if envValue := os.Getenv(envVar); envValue != "" {
-		parts := strings.Split(envValue, ",")
-		ids := make([]int, 0, len(parts))
-		for _, part := range parts {
-			if id, err := strconv.Atoi(strings.TrimSpace(part)); err == nil {
-				ids = append(ids, id)
-			}
-		}
-		if len(ids) > 0 {
-			c.Telegram.AllowedUserIDs = ids
-		}
-	}
 }

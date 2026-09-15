@@ -24,7 +24,7 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 	logger.Infof("收到文本输入: userID=%d, text=%s", userID, text)
 
 	if transactionID, inputType, ok := b.resolveWaitingInputTarget(userID, message.ReplyToMessage); ok {
-		b.trackUserMessage(userID, transactionID, message.MessageID)
+		b.trackMessage(userID, transactionID, message.MessageID)
 		logger.Infof("用户 %d 在等待输入: transactionID=%s, inputType=%s", userID, transactionID, inputType)
 
 		switch inputType {
@@ -48,7 +48,7 @@ func (b *Bot) handleTextInput(message *tgbotapi.Message) {
 		return
 	}
 
-	b.trackUserMessage(userID, transactionID, message.MessageID)
+	b.trackMessage(userID, transactionID, message.MessageID)
 	b.handleGuidanceInput(userID, transactionID, guidance)
 }
 
@@ -289,7 +289,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 
 	// 发送重新识别的提示消息，并追踪消息ID
 	msgID := b.sendMessageWithNilKeyboard(userID, "🔄 正在重新识别图片...")
-	b.trackBotMessage(userID, transactionID, msgID)
+	b.trackMessage(userID, transactionID, msgID)
 
 	// 获取 LLM 信号量，控制并发
 	b.llmSemaphore <- struct{}{}
@@ -310,7 +310,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	accounts := b.beancountMgr.GetAllCategories()
 	allAccounts := allAvailableAccounts(accounts)
 
-	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, []string{}, nil, "")
+	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, nil, "")
 	if err != nil {
 		logger.Errorf("LLM 重新解析失败: %v", err)
 		b.sendRetryErrorKeyboard(userID, transactionID)
@@ -350,8 +350,6 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 		data.SpecialDirectives = parseResult.SpecialDirectives
 		data.ConversationHistory = newHistory
 		data.LastMessageID = messageID
-		data.EditingPostingIndex = -1
-		data.EditingPostingMessageID = 0
 		data.PreviousMessageIDs = []int{}
 	}
 	b.mu.Unlock()
@@ -380,7 +378,7 @@ func (b *Bot) sendRetryErrorKeyboard(userID int, transactionID string) {
 	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
 	} else {
-		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
+		b.trackMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 
@@ -429,7 +427,7 @@ func (b *Bot) startGuidedRetry(userID int, transactionID string, messageID int) 
 	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
 	} else {
-		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
+		b.trackMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 
@@ -457,7 +455,7 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 
 	// 发送处理中提示
 	msgID := b.sendMessageWithNilKeyboard(userID, "🔄 正在根据您的引导重新识别...")
-	b.trackBotMessage(userID, transactionID, msgID)
+	b.trackMessage(userID, transactionID, msgID)
 
 	// 获取 LLM 信号量
 	b.llmSemaphore <- struct{}{}
@@ -475,10 +473,9 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 	allAccounts := allAvailableAccounts(accounts)
 
 	// 使用带引导的解析方法
-	parseResult, newHistory, err := b.llmParser.ParseWithGuidance(
+	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(
 		data.OriginalTempFilePath,
 		allAccounts,
-		[]string{},
 		data.ConversationHistory,
 		guidance,
 	)
@@ -559,7 +556,7 @@ func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance str
 	if sentMsg, sendErr := b.botAPI.Send(msg); sendErr != nil {
 		logger.Errorf("发送消息失败: %v", sendErr)
 	} else {
-		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
+		b.trackMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 

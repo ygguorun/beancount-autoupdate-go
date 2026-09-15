@@ -292,48 +292,6 @@ func (m *Manager) loadSSHKey(keyPath string) transport.AuthMethod {
 	return auth
 }
 
-// HasChanges 检查是否有未提交的更改
-func (m *Manager) HasChanges() (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	logger.Infof("检查仓库状态...")
-
-	if m.repo == nil {
-		logger.Errorf("仓库未初始化")
-		return false, fmt.Errorf("repository not initialized")
-	}
-
-	logger.Infof("获取 Worktree...")
-	worktree, err := m.repo.Worktree()
-	if err != nil {
-		logger.Errorf("获取 Worktree 失败: %v", err)
-		return false, err
-	}
-
-	logger.Infof("获取仓库状态...")
-	status, err := worktree.Status()
-	if err != nil {
-		logger.Errorf("获取仓库状态失败: %v", err)
-		return false, err
-	}
-
-	logger.Infof("仓库是否干净: %v", status.IsClean())
-
-	if !status.IsClean() {
-		logger.Infof("检测到未提交的更改:")
-		for file, fileStatus := range status {
-			staging := fileStatus.Staging
-			worktree := fileStatus.Worktree
-			logger.Infof("  %s: Staging=%v, Worktree=%v", file, staging, worktree)
-		}
-		return true, nil
-	}
-
-	logger.Infof("仓库干净，没有未提交的更改")
-	return false, nil
-}
-
 // CommitChanges 提交更改
 func (m *Manager) CommitChanges(message string) (bool, error) {
 	m.mu.Lock()
@@ -591,62 +549,4 @@ func isPackfileNotFound(err error) bool {
 	}
 
 	return strings.Contains(strings.ToLower(err.Error()), "packfile not found")
-}
-
-// GetStatus 获取仓库状态
-func (m *Manager) GetStatus() (string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.repo == nil {
-		return "No repository", nil
-	}
-
-	worktree, err := m.repo.Worktree()
-	if err != nil {
-		return "", err
-	}
-
-	status, err := worktree.Status()
-	if err != nil {
-		return "", err
-	}
-
-	// 获取当前分支
-	ref, err := m.repo.Head()
-	if err != nil {
-		return "", err
-	}
-
-	branchName := ref.Name().Short()
-
-	var result strings.Builder
-	fmt.Fprintf(&result, "Branch: %s\n", branchName)
-	fmt.Fprintf(&result, "Clean: %v\n", status.IsClean())
-
-	if !status.IsClean() {
-		result.WriteString("Changed files:\n")
-		for file, fileStatus := range status {
-			fmt.Fprintf(&result, "  %s: %v\n", file, fileStatus.Staging)
-		}
-	}
-
-	return result.String(), nil
-}
-
-// AddRemote 添加远程仓库
-func (m *Manager) AddRemote(name, url string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if m.repo == nil {
-		return fmt.Errorf("no repository")
-	}
-
-	_, err := m.repo.CreateRemote(&config.RemoteConfig{
-		Name: name,
-		URLs: []string{url},
-	})
-
-	return err
 }

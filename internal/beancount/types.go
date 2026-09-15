@@ -11,15 +11,6 @@ const (
 	AccountTypeEquity      AccountType = "Equity"
 )
 
-// TransactionType 交易类型枚举
-type TransactionType string
-
-const (
-	TransactionTypeExpense  TransactionType = "expense"
-	TransactionTypeIncome   TransactionType = "income"
-	TransactionTypeTransfer TransactionType = "transfer"
-)
-
 // PostingData 分录数据
 type PostingData struct {
 	Account  string `json:"account"`
@@ -62,15 +53,10 @@ type PendingTransaction struct {
 	Postings                      []PostingData
 	OrderID                       string
 	Extra                         map[string]string
-	ImageURL                      string
 	TempImageURL                  string
 	TempWebDAVPath                string
-	EditingPostingIndex           int
-	AvailableAccounts             []string
-	AccountPage                   int
 	LastMessageID                 int                   // 最后一条消息的ID，用于编辑消息
 	OriginalMessageID             int                   // 原始预览消息的ID，用于返回预览
-	EditingPostingMessageID       int                   // 分录编辑界面的消息ID
 	PreviousMessageIDs            []int                 // 之前需要删除的消息ID列表
 	SpecialDirectives             []string              // 特殊指令，如 pad、balance 等
 	SourceImageMessageID          int                   // 源图片消息ID（用户发送或Bot发送的图片）

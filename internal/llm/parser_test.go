@@ -328,7 +328,7 @@ func TestBuildResponseInput(t *testing.T) {
 	p := &Parser{}
 
 	t.Run("first request with image", func(t *testing.T) {
-		input := p.buildResponseInput("prompt", "abc123", nil, "")
+		input := p.buildResponseInput("prompt", "abc123", nil, "", "image/jpeg")
 		if len(input) != 1 {
 			t.Fatalf("unexpected input length: got %d want 1", len(input))
 		}
@@ -365,7 +365,7 @@ func TestBuildResponseInput(t *testing.T) {
 			{Role: "assistant", Content: "assistant reply"},
 		}
 
-		input := p.buildResponseInput("ignored", "ignored", history, "please retry")
+		input := p.buildResponseInput("ignored", "ignored", history, "please retry", "")
 		if len(input) != 3 {
 			t.Fatalf("unexpected input length: got %d want 3", len(input))
 		}
@@ -396,7 +396,7 @@ func TestBuildResponseInput(t *testing.T) {
 	t.Run("guidance prefix idempotent", func(t *testing.T) {
 		history := []beancount.ConversationMessage{{Role: "assistant", Content: "assistant reply"}}
 
-		input := p.buildResponseInput("ignored", "ignored", history, "补充信息：please retry")
+		input := p.buildResponseInput("ignored", "ignored", history, "补充信息：please retry", "")
 		guidance := input[1].OfMessage
 		if guidance == nil {
 			t.Fatalf("expected guidance message item")

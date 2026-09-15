@@ -3,6 +3,7 @@ package telegram
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"beancount-autoupdate/internal/beancount"
@@ -183,13 +184,8 @@ func (b *Bot) handlePendingCommand(message *tgbotapi.Message) {
 		// 计算总金额
 		var totalAmount float64
 		for _, posting := range data.Postings {
-			if posting.Amount != "" {
-				var amount float64
-				if _, err := fmt.Sscanf(posting.Amount, "%f", &amount); err == nil {
-					if amount > 0 {
-						totalAmount += amount
-					}
-				}
+			if amount, err := strconv.ParseFloat(posting.Amount, 64); err == nil && amount > 0 {
+				totalAmount += amount
 			}
 		}
 

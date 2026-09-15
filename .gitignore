@@ -48,3 +48,6 @@ temp/
 
 config.toml
 beancount-skill-0.1.0/
+
+# Session logs
+session-*.md

@@ -45,7 +45,16 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 	}
 
 	var builder strings.Builder
-	var keyboard tgbotapi.InlineKeyboardMarkup
+	keyboard := tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
+			tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
+			tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
+		),
+	)
 
 	if len(data.SpecialDirectives) > 0 {
 		builder.WriteString("📋 特殊指令预览\n")
@@ -60,17 +69,6 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		}
 		builder.WriteString("\n💬 可直接回复本消息输入修改意见\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
-			),
-		)
 	} else {
 		builder.WriteString("📋 交易预览\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
@@ -113,17 +111,6 @@ func (b *Bot) showTransactionPreview(userID int, transactionID string, messageID
 		}
 		builder.WriteString("\n💬 可直接回复本消息输入修改意见\n")
 		builder.WriteString("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-
-		keyboard = tgbotapi.NewInlineKeyboardMarkup(
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("💬 引导重试", fmt.Sprintf("%s:guided_retry", transactionID)),
-				tgbotapi.NewInlineKeyboardButtonData("🔄 重新识别", fmt.Sprintf("%s:rerun_recognition", transactionID)),
-			),
-			tgbotapi.NewInlineKeyboardRow(
-				tgbotapi.NewInlineKeyboardButtonData("✅ 确认提交", fmt.Sprintf("%s:confirm", transactionID)),
-				tgbotapi.NewInlineKeyboardButtonData("❌ 取消", fmt.Sprintf("%s:cancel", transactionID)),
-			),
-		)
 	}
 
 	if messageID > 0 {

@@ -97,7 +97,7 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 			len(accounts[beancount.AccountTypeIncome]))
 
 		var history []beancount.ConversationMessage
-		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, []string{}, nil, "")
+		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, nil, "")
 		switch {
 		case parseErr != nil:
 			logger.Errorf("LLM 解析失败: %v", parseErr)
@@ -165,7 +165,6 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 		OrderID:                       parseResult.OrderID,
 		Extra:                         parseResult.Extra,
 		OriginalTempFilePath:          tempFile,
-		ImageURL:                      "",
 		TempImageURL:                  uploadResult,
 		TempWebDAVPath:                actualTempWebDAVPath,
 		SpecialDirectives:             parseResult.SpecialDirectives,
@@ -226,7 +225,7 @@ func (b *Bot) sendRecognitionErrorKeyboard(userID int, transactionID string, rep
 	if sentMsg, err := b.botAPI.Send(msg); err != nil {
 		logger.Errorf("发送消息失败: %v", err)
 	} else {
-		b.trackBotMessage(userID, transactionID, sentMsg.MessageID)
+		b.trackMessage(userID, transactionID, sentMsg.MessageID)
 	}
 }
 

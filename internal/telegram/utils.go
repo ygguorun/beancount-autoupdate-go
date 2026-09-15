@@ -57,7 +57,6 @@ func clonePendingTransaction(source *beancount.PendingTransaction) *beancount.Pe
 	clone.Tags = slices.Clone(source.Tags)
 	clone.Postings = slices.Clone(source.Postings)
 	clone.Extra = maps.Clone(source.Extra)
-	clone.AvailableAccounts = slices.Clone(source.AvailableAccounts)
 	clone.PreviousMessageIDs = slices.Clone(source.PreviousMessageIDs)
 	clone.SpecialDirectives = slices.Clone(source.SpecialDirectives)
 	clone.ConversationContextMessageIDs = slices.Clone(source.ConversationContextMessageIDs)
@@ -98,39 +97,17 @@ func (b *Bot) deleteMessages(userID int, messageIDs []int) {
 	}
 }
 
-// trackUserMessage 追踪用户输入的消息ID（用于后续删除）
-func (b *Bot) trackUserMessage(userID int, transactionID string, messageID int) {
+// trackMessage 追踪交易相关消息ID（用户输入或Bot回复，用于后续删除）
+func (b *Bot) trackMessage(userID int, transactionID string, messageID int) {
 	if messageID <= 0 {
 		return
 	}
 	stateChanged := false
 	b.mu.Lock()
-	if txMap, ok := b.pendingTx[userID]; ok {
-		if data, ok := txMap[transactionID]; ok {
-			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
-			stateChanged = true
-			logger.Infof("追踪用户消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
-		}
-	}
-	b.mu.Unlock()
-	if stateChanged {
-		b.persistSessionState()
-	}
-}
-
-// trackBotMessage 追踪Bot发送的提示消息ID（用于后续删除）
-func (b *Bot) trackBotMessage(userID int, transactionID string, messageID int) {
-	if messageID <= 0 {
-		return
-	}
-	stateChanged := false
-	b.mu.Lock()
-	if txMap, ok := b.pendingTx[userID]; ok {
-		if data, ok := txMap[transactionID]; ok {
-			data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
-			stateChanged = true
-			logger.Infof("追踪Bot消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
-		}
+	if data, ok := b.pendingTx[userID][transactionID]; ok {
+		data.ConversationContextMessageIDs = append(data.ConversationContextMessageIDs, messageID)
+		stateChanged = true
+		logger.Infof("追踪消息: userID=%d, transactionID=%s, messageID=%d, total=%d", userID, transactionID, messageID, len(data.ConversationContextMessageIDs))
 	}
 	b.mu.Unlock()
 	if stateChanged {

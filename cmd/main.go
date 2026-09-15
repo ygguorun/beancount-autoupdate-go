@@ -94,12 +94,6 @@ func main() {
 		logger.Fatalf("初始化 Beancount 管理器失败: %v", err)
 	}
 
-	// 如果是新初始化的仓库，提交并推送初始文件
-	if beancountMgr.IsNewRepo() {
-		logger.Info("检测到新仓库，正在提交初始文件...")
-		// 初始化 Git 管理器后处理
-	}
-
 	// 初始化 Git 管理器
 	logger.Info("初始化 Git 管理器...")
 	gitMgr, err := git.NewManager(

@@ -3,14 +3,12 @@ package webdav
 import (
 	"bytes"
 	"crypto/tls"
-	"encoding/xml"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path"
 	"strings"
-	"sync"
 	"time"
 
 	"beancount-autoupdate/internal/logger"
@@ -20,12 +18,10 @@ import (
 
 // Manager WebDAV 管理器
 type Manager struct {
-	client    *http.Client
-	url       string
-	username  string
-	password  string
-	verifySSL bool
-	mu        sync.Mutex
+	client   *http.Client
+	url      string
+	username string
+	password string
 }
 
 // NewManager 创建 WebDAV 管理器
@@ -43,11 +39,10 @@ func NewManager(url, username, password string, verifySSL bool) (*Manager, error
 	}
 
 	m := &Manager{
-		client:    client,
-		url:       strings.TrimRight(url, "/"),
-		username:  username,
-		password:  password,
-		verifySSL: verifySSL,
+		client:   client,
+		url:      strings.TrimRight(url, "/"),
+		username: username,
+		password: password,
 	}
 
 	return m, nil
@@ -55,9 +50,6 @@ func NewManager(url, username, password string, verifySSL bool) (*Manager, error
 
 // TestConnection 测试连接
 func (m *Manager) TestConnection() (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	// 尝试读取根目录
 	req, err := m.createRequest("PROPFIND", "/", nil)
 	if err != nil {
@@ -97,28 +89,6 @@ func (m *Manager) UploadFile(localPath, remotePath, filenameTemplate string, dat
 	data, err := os.ReadFile(localPath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read local file: %w", err)
-	}
-
-	// 上传文件
-	if err := m.uploadBytes(data, remoteFilePath); err != nil {
-		return "", fmt.Errorf("failed to upload file: %w", err)
-	}
-
-	// 构建完整的 URL
-	remoteURL := m.buildURL(remoteFilePath)
-
-	return remoteURL, nil
-}
-
-// UploadFileFromBytes 从字节数组上传文件
-func (m *Manager) UploadFileFromBytes(data []byte, remotePath, filenameTemplate string, date time.Time, orderID string) (string, error) {
-	// 生成文件名
-	filename := m.GenerateFilename(filenameTemplate, date, orderID)
-
-	// 构建完整的远程路径
-	remoteFilePath := path.Join(remotePath, filename)
-	if err := m.ensureParentDirectory(remoteFilePath); err != nil {
-		return "", fmt.Errorf("failed to ensure directory: %w", err)
 	}
 
 	// 上传文件
@@ -182,11 +152,6 @@ func (m *Manager) GenerateFilename(template string, date time.Time, orderID stri
 func (m *Manager) GenerateReceiptPath(remotePath string, date time.Time, orderID string, extension string) string {
 	transactionTime := effectiveTime(date)
 	return path.Join(remotePath, transactionTime.Format("200601"), generateReceiptFilename(transactionTime, orderID, extension))
-}
-
-// GenerateReceiptFilename 生成确认后的收据图片文件名。
-func (m *Manager) GenerateReceiptFilename(date time.Time, orderID string, extension string) string {
-	return generateReceiptFilename(effectiveTime(date), orderID, extension)
 }
 
 func generateReceiptFilename(transactionTime time.Time, orderID string, extension string) string {
@@ -291,9 +256,6 @@ func (m *Manager) createDirectory(directoryPath string) error {
 
 // MoveFile 移动/重命名文件
 func (m *Manager) MoveFile(sourcePath, destinationPath string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	sourcePath = strings.TrimLeft(sourcePath, "/")
 	destinationPath = strings.TrimLeft(destinationPath, "/")
 
@@ -334,9 +296,6 @@ func (m *Manager) MoveFile(sourcePath, destinationPath string) (bool, error) {
 
 // DeleteFile 删除文件
 func (m *Manager) DeleteFile(filePath string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	filePath = strings.TrimLeft(filePath, "/")
 
 	// 删除文件
@@ -397,23 +356,4 @@ func (m *Manager) createRequest(method, urlPath string, body io.Reader) (*http.R
 	}
 
 	return req, nil
-}
-
-// WebDAVMultiStatus WebDAV 响应结构
-type WebDAVMultiStatus struct {
-	XMLName   xml.Name         `xml:"multistatus"`
-	Responses []WebDAVResponse `xml:"response"`
-}
-
-// WebDAVResponse WebDAV 响应项
-type WebDAVResponse struct {
-	Href     string `xml:"href"`
-	PropStat struct {
-		Prop struct {
-			ResourceType struct {
-				Collection []string `xml:"collection"`
-			} `xml:"resourcetype"`
-		} `xml:"prop"`
-		Status string `xml:"status"`
-	} `xml:"propstat"`
 }

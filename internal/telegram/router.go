@@ -37,13 +37,9 @@ func (b *Bot) Run() error {
 		}()
 	}
 
-	// 分发消息到 workers
+	// 分发消息到 workers（worker 内判断类型）
 	for update := range updates {
-		if update.Message != nil {
-			workerChan <- update
-		} else if update.CallbackQuery != nil {
-			workerChan <- update
-		}
+		workerChan <- update
 	}
 	close(workerChan)
 	workerWG.Wait()

@@ -24,11 +24,6 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 	document := message.Document
 	userID := int(message.From.ID)
 
-	if !b.config.IsUserAllowed(userID) {
-		b.sendReply(message, "❌ 您没有权限使用此机器人")
-		return
-	}
-
 	if !strings.HasPrefix(document.MimeType, "image/") {
 		b.sendReply(message, "❌ 仅支持图片文件")
 		return
@@ -67,11 +62,6 @@ func (b *Bot) handleDocument(message *tgbotapi.Message) {
 // handlePhoto 处理照片
 func (b *Bot) handlePhoto(message *tgbotapi.Message) {
 	userID := int(message.From.ID)
-
-	if !b.config.IsUserAllowed(userID) {
-		b.sendReply(message, "❌ 您没有权限使用此机器人")
-		return
-	}
 
 	photos := message.Photo
 	if len(photos) == 0 {
@@ -122,11 +112,6 @@ func (b *Bot) isBotPhotoMessage(msg *tgbotapi.Message) bool {
 // handleReplyToBotPhoto 处理用户回复 Bot 发送的图片
 func (b *Bot) handleReplyToBotPhoto(message *tgbotapi.Message) {
 	userID := int(message.From.ID)
-
-	if !b.config.IsUserAllowed(userID) {
-		b.sendReply(message, "❌ 您没有权限使用此机器人")
-		return
-	}
 
 	replyToMsg := message.ReplyToMessage
 	if replyToMsg == nil {

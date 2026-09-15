@@ -9,60 +9,28 @@ import (
 //go:embed templates/*
 var templatesFS embed.FS
 
-// TemplateFiles 嵌入的模板文件
-var TemplateFiles = map[string]string{
-	"init.bean":                     "",
-	"assets.bean":                   "",
-	"equity.bean":                   "",
-	"expenses.bean":                 "",
-	"income.bean":                   "",
-	"liabilities.bean":              "",
-	"receipt_image_recognition.txt": "",
-}
-
 // GetTemplate 获取模板文件内容
 func GetTemplate(name string) (string, error) {
-	if content, ok := TemplateFiles[name]; ok && content != "" {
-		return content, nil
-	}
-
-	// 从 embed.FS 读取
-	data, err := templatesFS.ReadFile(fmt.Sprintf("templates/%s", name))
+	data, err := templatesFS.ReadFile("templates/" + name)
 	if err != nil {
 		return "", fmt.Errorf("failed to read template %s: %w", name, err)
 	}
-
-	content := string(data)
-	TemplateFiles[name] = content // 缓存
-	return content, nil
+	return string(data), nil
 }
 
-// GetTemplateOrPanic 获取模板文件内容，如果失败则 panic
-func GetTemplateOrPanic(name string) string {
-	content, err := GetTemplate(name)
-	if err != nil {
-		panic(err)
-	}
-	return content
-}
-
-// InitTemplates 初始化所有模板（在程序启动时调用）
+// InitTemplates 启动时校验所有嵌入模板可读取（embed 数据本就在内存，无需缓存）
 func InitTemplates() error {
-	templateNames := []string{
-		"init.bean",
-		"assets.bean",
-		"equity.bean",
-		"expenses.bean",
-		"income.bean",
-		"liabilities.bean",
-		"receipt_image_recognition.txt",
+	entries, err := templatesFS.ReadDir("templates")
+	if err != nil {
+		return fmt.Errorf("failed to read embedded templates: %w", err)
 	}
-
-	for _, name := range templateNames {
-		if _, err := GetTemplate(name); err != nil {
-			return fmt.Errorf("failed to load template %s: %w", name, err)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if _, err := GetTemplate(entry.Name()); err != nil {
+			return err
 		}
 	}
-
 	return nil
 }

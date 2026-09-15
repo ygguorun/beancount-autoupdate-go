@@ -3,7 +3,6 @@ package config
 import (
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -96,44 +95,6 @@ func TestGetAbsPath(t *testing.T) {
 		want := filepath.Join("/tmp/project", "logs/app.log")
 		if got != want {
 			t.Fatalf("unexpected path: got %q want %q", got, want)
-		}
-	})
-}
-
-func TestParseAllowedUserIDs(t *testing.T) {
-	t.Run("parse valid and ignore invalid", func(t *testing.T) {
-		cfg := &Config{}
-		t.Setenv("TEST_ALLOWED_IDS", "123, 456,abc, 789")
-
-		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS")
-
-		want := []int{123, 456, 789}
-		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
-			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
-		}
-	})
-
-	t.Run("env empty keeps existing", func(t *testing.T) {
-		cfg := &Config{Telegram: TelegramConfig{AllowedUserIDs: []int{1, 2}}}
-		t.Setenv("TEST_ALLOWED_IDS_EMPTY", "")
-
-		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS_EMPTY")
-
-		want := []int{1, 2}
-		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
-			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
-		}
-	})
-
-	t.Run("all invalid keeps existing", func(t *testing.T) {
-		cfg := &Config{Telegram: TelegramConfig{AllowedUserIDs: []int{9}}}
-		t.Setenv("TEST_ALLOWED_IDS_INVALID", "x,y,z")
-
-		cfg.ParseAllowedUserIDs("TEST_ALLOWED_IDS_INVALID")
-
-		want := []int{9}
-		if !slices.Equal(cfg.Telegram.AllowedUserIDs, want) {
-			t.Fatalf("unexpected IDs: got %v want %v", cfg.Telegram.AllowedUserIDs, want)
 		}
 	})
 }
