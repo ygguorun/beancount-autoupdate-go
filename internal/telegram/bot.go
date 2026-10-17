@@ -59,7 +59,7 @@ func NewBot(
 		pendingTx:       make(map[int]map[string]*beancount.PendingTransaction),
 		waitingForInput: make(map[int]map[string]string),
 		stateFilePath:   cfg.GetAbsPath(filepath.Join("tmp", "telegram_sessions.json")),
-		llmSemaphore:    make(chan struct{}, 1), // 限制 LLM 并发为1
+		llmSemaphore:    make(chan struct{}, 10), // 限制 LLM 并发为10
 		runDone:         make(chan struct{}),
 	}
 
