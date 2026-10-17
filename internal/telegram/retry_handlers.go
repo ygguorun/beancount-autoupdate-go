@@ -343,12 +343,14 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, nil, "")
 	if err != nil {
 		logger.Errorf("LLM 重新解析失败: %v", err)
+		b.saveFailedHistory(userID, transactionID, newHistory)
 		b.sendRetryErrorKeyboard(userID, transactionID)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("LLM 重新解析返回空结果")
+		b.saveFailedHistory(userID, transactionID, newHistory)
 		b.sendRetryErrorKeyboard(userID, transactionID)
 		return
 	}
@@ -511,13 +513,13 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 	)
 	if err != nil {
 		logger.Errorf("引导重试失败: %v", err)
-		b.handleGuidanceError(userID, transactionID, guidance, err)
+		b.handleGuidanceError(userID, transactionID, guidance, newHistory, err)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("引导重试返回空结果")
-		b.handleGuidanceError(userID, transactionID, guidance, nil)
+		b.handleGuidanceError(userID, transactionID, guidance, newHistory, nil)
 		return
 	}
 
@@ -551,15 +553,38 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 	b.showTransactionPreview(userID, transactionID, 0)
 }
 
-// handleGuidanceError 处理引导错误
-func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance string, err error) {
-	// 保留历史，允许继续重试
+// mergeFailedGuidanceHistory 合并引导重试失败后的对话历史。
+// LLM 层返回了包含错误输出与错误提示的历史（failed 比 current 更长）时直接采用；
+// 否则（如 API 网络错误、无模型输出）退回旧行为，仅追加用户引导文字。
+func mergeFailedGuidanceHistory(current, failed []beancount.ConversationMessage, guidance string) []beancount.ConversationMessage {
+	if len(failed) > len(current) {
+		return failed
+	}
+	return append(current, beancount.ConversationMessage{
+		Role:    "user",
+		Content: guidance,
+	})
+}
+
+// saveFailedHistory 保存重新识别失败时返回的对话历史（含模型错误输出与错误提示），空历史不覆盖现有记录
+func (b *Bot) saveFailedHistory(userID int, transactionID string, failedHistory []beancount.ConversationMessage) {
+	if len(failedHistory) == 0 {
+		return
+	}
 	b.mu.Lock()
 	if d, ok := b.pendingTx[userID][transactionID]; ok {
-		d.ConversationHistory = append(d.ConversationHistory, beancount.ConversationMessage{
-			Role:    "user",
-			Content: guidance,
-		})
+		d.ConversationHistory = failedHistory
+	}
+	b.mu.Unlock()
+	b.persistSessionState()
+}
+
+// handleGuidanceError 处理引导错误
+func (b *Bot) handleGuidanceError(userID int, transactionID string, guidance string, failedHistory []beancount.ConversationMessage, err error) {
+	// 保留历史，允许继续重试；若失败历史包含模型错误输出则一并记录
+	b.mu.Lock()
+	if d, ok := b.pendingTx[userID][transactionID]; ok {
+		d.ConversationHistory = mergeFailedGuidanceHistory(d.ConversationHistory, failedHistory, guidance)
 	}
 	b.mu.Unlock()
 	b.persistSessionState()

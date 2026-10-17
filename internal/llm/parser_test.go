@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,39 @@ import (
 
 	"beancount-autoupdate/internal/beancount"
 )
+
+func TestBuildFailedParseHistory(t *testing.T) {
+	p := &Parser{}
+
+	baseHistory := []beancount.ConversationMessage{
+		{Role: "user", Content: "initial prompt", ImageBase64: "img"},
+		{Role: "assistant", Content: `{"datetime":"2026-01-01 00:00:00"}`},
+	}
+
+	parseErr := errors.New("failed to unmarshal JSON: json: cannot unmarshal array into Go value of type llm.transactionDataRaw")
+	got := p.buildFailedParseHistory(baseHistory, "副业收入", "", "", `[{"datetime":"2026-09-10 14:49:26"}]`, parseErr)
+
+	if len(got) != 5 {
+		t.Fatalf("expected 5 messages, got %d: %#v", len(got), got)
+	}
+	if got[0].Content != "initial prompt" || got[1].Content != `{"datetime":"2026-01-01 00:00:00"}` {
+		t.Fatalf("original history altered: %#v", got[:2])
+	}
+	if got[2].Role != "user" || got[2].Content != "副业收入" {
+		t.Fatalf("unexpected guidance message: %#v", got[2])
+	}
+	if got[3].Role != "assistant" || !strings.Contains(got[3].Content, `[{"datetime"`) {
+		t.Fatalf("failed assistant output not kept: %#v", got[3])
+	}
+	if got[4].Role != "user" ||
+		!strings.Contains(got[4].Content, "无法解析") ||
+		!strings.Contains(got[4].Content, "cannot unmarshal array") {
+		t.Fatalf("error hint missing or wrong: %#v", got[4])
+	}
+	if len(baseHistory) != 2 {
+		t.Fatalf("input history mutated: %#v", baseHistory)
+	}
+}
 
 func TestParseResponse(t *testing.T) {
 	p := &Parser{}

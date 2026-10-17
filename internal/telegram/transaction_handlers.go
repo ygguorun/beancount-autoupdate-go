@@ -101,8 +101,10 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 		switch {
 		case parseErr != nil:
 			logger.Errorf("LLM 解析失败: %v", parseErr)
+			parseHistory = history
 		case parseResult == nil:
 			logger.Warnf("LLM 解析返回空结果")
+			parseHistory = history
 		default:
 			logger.Infof("LLM 解析成功: payee=%s, narration=%s, postings=%d",
 				parseResult.Payee, parseResult.Narration, len(parseResult.Postings))
@@ -116,14 +118,14 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 
 	if parseErr != nil {
 		logger.Errorf("解析图片%s失败: %v", sourceType, parseErr)
-		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs)
+		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs, parseHistory)
 		b.sendRecognitionErrorKeyboard(userID, transactionID, sourceMessageID)
 		return
 	}
 
 	if parseResult == nil {
 		logger.Warnf("解析结果为空")
-		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs)
+		b.createPendingTxWithError(userID, transactionID, tempFile, sourceMessageID, promptMessageID, extraContextMessageIDs, parseHistory)
 		b.sendRecognitionErrorKeyboard(userID, transactionID, sourceMessageID)
 		return
 	}
@@ -185,8 +187,8 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 	logger.Infof("预览显示完成")
 }
 
-// createPendingTxWithError 创建带错误的待确认交易（用于重新识别）
-func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFile string, messageID int, promptMessageID int, extraContextMessageIDs []int) {
+// createPendingTxWithError 创建带错误的待确认交易（用于重新识别），保留失败历史供引导重试使用
+func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFile string, messageID int, promptMessageID int, extraContextMessageIDs []int, history []beancount.ConversationMessage) {
 	b.mu.Lock()
 	if b.pendingTx[userID] == nil {
 		b.pendingTx[userID] = make(map[string]*beancount.PendingTransaction)
@@ -200,6 +202,7 @@ func (b *Bot) createPendingTxWithError(userID int, transactionID string, tempFil
 		LastMessageID:                 messageID,
 		OriginalMessageID:             messageID,
 		ConversationContextMessageIDs: contextMessageIDs,
+		ConversationHistory:           history,
 	}
 	if promptMessageID > 0 {
 		b.pendingTx[userID][transactionID].ConversationContextMessageIDs = append(b.pendingTx[userID][transactionID].ConversationContextMessageIDs, promptMessageID)

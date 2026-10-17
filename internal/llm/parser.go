@@ -178,7 +178,8 @@ func (p *Parser) ParseImageWithHistory(
 		}
 	}
 	if err != nil {
-		return nil, history, fmt.Errorf("failed to parse response: %w", err)
+		// 解析失败时返回尝试后的历史（可能包含错误输出与错误提示），供上层保留供引导重试
+		return nil, newHistory, fmt.Errorf("failed to parse response: %w", err)
 	}
 
 	return transactionData, newHistory, nil
@@ -481,7 +482,7 @@ func (p *Parser) callWithResponsesStructuredOutput(
 
 	transactionData, err := p.parseResponse(content)
 	if err != nil {
-		return nil, history, err
+		return nil, p.buildFailedParseHistory(history, prompt, imageBase64, imageMIMEType, content, err), err
 	}
 
 	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
@@ -537,7 +538,7 @@ func (p *Parser) callChatCompletion(
 
 	transactionData, err := p.parseResponse(content)
 	if err != nil {
-		return nil, history, err
+		return nil, p.buildFailedParseHistory(history, prompt, imageBase64, imageMIMEType, content, err), err
 	}
 
 	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
@@ -571,6 +572,24 @@ func (p *Parser) updateHistory(history []beancount.ConversationMessage, userProm
 		Content: assistantResponse,
 	})
 	return history
+}
+
+// buildFailedParseHistory 构建解析失败时的对话历史：
+// 保留模型原始错误输出（assistant），并追加一条包含错误信息的用户提示，
+// 使后续引导重试时 LLM 能看到自己上一次的输出与解析失败原因，便于自我修正格式。
+func (p *Parser) buildFailedParseHistory(
+	history []beancount.ConversationMessage,
+	userPrompt, imageBase64, imageMIMEType, assistantResponse string,
+	parseErr error,
+) []beancount.ConversationMessage {
+	newHistory := p.updateHistory(history, userPrompt, imageBase64, imageMIMEType, assistantResponse)
+	return append(newHistory, beancount.ConversationMessage{
+		Role: "user",
+		Content: fmt.Sprintf(
+			"你上一次的回复无法解析为交易数据: %v\n请严格按照 JSON Schema 输出单个交易 JSON 对象，不要用数组包裹，也不要添加多余文本。",
+			parseErr,
+		),
+	})
 }
 
 // generateTransactionSchema 生成 TransactionData 的 JSON Schema

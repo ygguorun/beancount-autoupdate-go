@@ -156,3 +156,89 @@ func TestResolveWaitingInputTarget(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeFailedGuidanceHistory(t *testing.T) {
+	current := []beancount.ConversationMessage{
+		{Role: "user", Content: "prompt", ImageBase64: "img"},
+		{Role: "assistant", Content: `{}`},
+	}
+	failed := []beancount.ConversationMessage{
+		{Role: "user", Content: "prompt", ImageBase64: "img"},
+		{Role: "assistant", Content: `{}`},
+		{Role: "user", Content: "副业收入"},
+		{Role: "assistant", Content: `[{"datetime":"2026-09-10 14:49:26"}]`},
+		{Role: "user", Content: "你上一次的回复无法解析为交易数据: cannot unmarshal array"},
+	}
+
+	tests := []struct {
+		name     string
+		current  []beancount.ConversationMessage
+		failed   []beancount.ConversationMessage
+		guidance string
+		wantLen  int
+		check    func(t *testing.T, got []beancount.ConversationMessage)
+	}{
+		{
+			name:     "failed history with error output replaces current",
+			current:  current,
+			failed:   failed,
+			guidance: "副业收入",
+			wantLen:  5,
+			check: func(t *testing.T, got []beancount.ConversationMessage) {
+				if got[3].Role != "assistant" || got[3].Content != `[{"datetime":"2026-09-10 14:49:26"}]` {
+					t.Fatalf("failed assistant output missing: %#v", got[3])
+				}
+				if got[4].Role != "user" || got[4].Content == "" {
+					t.Fatalf("error hint message missing: %#v", got[4])
+				}
+			},
+		},
+		{
+			name:     "empty failed history falls back to appending guidance",
+			current:  current,
+			failed:   nil,
+			guidance: "金额应为 35.00",
+			wantLen:  3,
+			check: func(t *testing.T, got []beancount.ConversationMessage) {
+				last := got[2]
+				if last.Role != "user" || last.Content != "金额应为 35.00" {
+					t.Fatalf("unexpected appended guidance: %#v", last)
+				}
+			},
+		},
+		{
+			name:     "equal length failed history falls back to appending guidance",
+			current:  current,
+			failed:   current,
+			guidance: "继续",
+			wantLen:  3,
+			check: func(t *testing.T, got []beancount.ConversationMessage) {
+				if got[2].Content != "继续" {
+					t.Fatalf("unexpected fallback result: %#v", got[2])
+				}
+			},
+		},
+		{
+			name:     "nil current with nil failed appends guidance",
+			current:  nil,
+			failed:   nil,
+			guidance: "副业收入",
+			wantLen:  1,
+			check: func(t *testing.T, got []beancount.ConversationMessage) {
+				if got[0].Role != "user" || got[0].Content != "副业收入" {
+					t.Fatalf("unexpected result: %#v", got[0])
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := mergeFailedGuidanceHistory(tt.current, tt.failed, tt.guidance)
+			if len(got) != tt.wantLen {
+				t.Fatalf("length: got %d want %d (%#v)", len(got), tt.wantLen, got)
+			}
+			tt.check(t, got)
+		})
+	}
+}
