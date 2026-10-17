@@ -107,15 +107,19 @@ func (b *Bot) handleCancelCommand(message *tgbotapi.Message) {
 
 	logger.Infof("处理 /cancel 命令: userID=%d", userID)
 
+	replyMessageID := 0
+	if message.ReplyToMessage != nil {
+		replyMessageID = message.ReplyToMessage.MessageID
+	}
+
 	b.mu.Lock()
-	var transactionID string
-	var inputType string
-	if txMap, ok := b.waitingForInput[userID]; ok && len(txMap) > 0 {
-		for tid, itype := range txMap {
-			transactionID = tid
-			inputType = itype
-			break
-		}
+	transactionID, inputType, result := b.selectWaitingTargetLocked(userID, replyMessageID)
+
+	if result == waitingTargetAmbiguous {
+		b.mu.Unlock()
+		logger.Infof("用户 %d 有多笔等待输入的交易，/cancel 需要显式指定目标", userID)
+		b.sendReply(message, "⚠️ 有多笔交易正在等待输入，请回复对应交易的提示消息后再发送 /cancel")
+		return
 	}
 
 	if transactionID != "" {

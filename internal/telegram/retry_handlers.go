@@ -56,24 +56,54 @@ func (b *Bot) resolveWaitingInputTarget(userID int, replyTo *tgbotapi.Message) (
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
-	waitingMap, ok := b.waitingForInput[userID]
-	if !ok || len(waitingMap) == 0 {
-		return "", "", false
+	replyMessageID := 0
+	if replyTo != nil {
+		replyMessageID = replyTo.MessageID
 	}
 
-	if replyTo != nil {
-		if transactionID, found := b.findPendingTransactionByMessageIDLocked(userID, replyTo.MessageID); found {
-			if inputType, exists := waitingMap[transactionID]; exists {
-				return transactionID, inputType, true
+	transactionID, inputType, result := b.selectWaitingTargetLocked(userID, replyMessageID)
+	if result != waitingTargetFound {
+		return "", "", false
+	}
+	return transactionID, inputType, true
+}
+
+// waitingTargetResult 等待输入交易的选择结果
+type waitingTargetResult int
+
+const (
+	waitingTargetNone      waitingTargetResult = iota // 没有等待输入的交易
+	waitingTargetFound                                // 确定命中一笔
+	waitingTargetAmbiguous                            // 多笔等待且无法确定目标
+)
+
+// selectWaitingTargetLocked 确定性选择当前等待输入的交易。
+// 优先使用回复消息匹配（必须处于等待状态，显式回复到非等待交易时不猜测，交由引导目标解析处理）；
+// 其次在仅有一笔等待时自动路由；多笔等待且无回复匹配时返回 ambiguous，由调用方提示用户显式指定。
+// 调用方必须持有 b.mu（读或写）。
+func (b *Bot) selectWaitingTargetLocked(userID int, replyMessageID int) (string, string, waitingTargetResult) {
+	waitingMap, ok := b.waitingForInput[userID]
+	if !ok || len(waitingMap) == 0 {
+		return "", "", waitingTargetNone
+	}
+
+	if replyMessageID > 0 {
+		if transactionID, found := b.findPendingTransactionByMessageIDLocked(userID, replyMessageID); found {
+			inputType, exists := waitingMap[transactionID]
+			if !exists {
+				return "", "", waitingTargetNone
 			}
+			return transactionID, inputType, waitingTargetFound
 		}
 	}
 
-	for transactionID, inputType := range waitingMap {
-		return transactionID, inputType, true
+	if len(waitingMap) == 1 {
+		for transactionID, inputType := range waitingMap {
+			return transactionID, inputType, waitingTargetFound
+		}
 	}
 
-	return "", "", false
+	return "", "", waitingTargetAmbiguous
 }
 
 func (b *Bot) resolveGuidanceTarget(userID int, rawText string, replyTo *tgbotapi.Message) (string, string, string) {
@@ -234,7 +264,7 @@ func (b *Bot) buildAmbiguousTargetHint(userID int) string {
 	})
 
 	var builder strings.Builder
-	builder.WriteString("⚠️ 你有多笔待处理交易，请使用 #短ID 指定目标。\n")
+	builder.WriteString("⚠️ 你有多笔待处理交易，请回复目标交易的消息，或使用 #短ID 指定目标。\n")
 	builder.WriteString("例如：#ABC123 金额应为 35.00\n\n")
 	builder.WriteString("当前待处理：\n")
 
