@@ -42,6 +42,9 @@ logs/
 # Data
 beancount-data/
 
+# 回归集截图与配对口径（含个人财务信息，禁止入库）
+testdata/regset/
+
 # Temporary files
 tmp/
 temp/
