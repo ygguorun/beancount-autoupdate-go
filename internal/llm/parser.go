@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -120,11 +121,7 @@ func (p *Parser) ParseImageWithHistory(
 	logger.Debugf("LLM Input: history_count=%d, has_image=%v, current_prompt_len=%d", len(history), base64Image != "", len(userPromptOverride))
 	for i, msg := range history {
 		hasImage := msg.ImageBase64 != ""
-		contentPreview := msg.Content
-		if len(contentPreview) > 100 {
-			contentPreview = contentPreview[:100] + "..."
-		}
-		logger.Debugf("  History[%d] %s: %s (image=%v)", i, msg.Role, contentPreview, hasImage)
+		logger.Debugf("  History[%d] %s: %s (image=%v)", i, msg.Role, msg.Content, hasImage)
 	}
 	if userPromptOverride != "" {
 		logger.Debugf("  Current user: %s", userPromptOverride)
@@ -341,10 +338,17 @@ func (p *Parser) buildMessages(prompt, base64Image string, history []beancount.C
 	}
 
 	// 历史不为空，从历史构建消息（引导重试）
+	// 首条 user 消息是原始提示词，必须逐字节重发（不加引导前缀）以保证
+	// 稳定消息序列与网关前缀缓存命中；其余 user 消息是引导文字，带前缀。
+	firstUser := true
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
-			content := formatGuidanceForLLM(msg.Content)
+			content := msg.Content
+			if !firstUser {
+				content = formatGuidanceForLLM(content)
+			}
+			firstUser = false
 			messageMIMEType := msg.ImageMIMEType
 			// 如果历史消息包含图片，构建包含图片的用户消息
 			if msg.ImageBase64 != "" {
@@ -393,10 +397,17 @@ func (p *Parser) buildResponseInput(prompt, base64Image string, history []beanco
 	}
 
 	// 历史不为空，从历史构建消息（引导重试）
+	// 与 buildMessages 同规则：首条 user 消息逐字节重发（无引导前缀），缓存前缀稳定。
+	firstUser := true
 	for _, msg := range history {
 		switch msg.Role {
 		case "user":
-			input = append(input, buildResponsesUserMessage(formatGuidanceForLLM(msg.Content), msg.ImageBase64, msg.ImageMIMEType))
+			content := msg.Content
+			if !firstUser {
+				content = formatGuidanceForLLM(content)
+			}
+			firstUser = false
+			input = append(input, buildResponsesUserMessage(content, msg.ImageBase64, msg.ImageMIMEType))
 		case "assistant":
 			input = append(input, responses.ResponseInputItemParamOfMessage(msg.Content, responses.EasyInputMessageRoleAssistant))
 		}
@@ -452,6 +463,7 @@ func (p *Parser) callWithResponsesStructuredOutput(
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
+	t0 := time.Now()
 
 	resp, err := p.client.Responses.New(ctx, responses.ResponseNewParams{
 		Model: responses.ResponsesModel(p.model),
@@ -472,6 +484,7 @@ func (p *Parser) callWithResponsesStructuredOutput(
 	if err != nil {
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
+	logResponsesUsage("交易/Responses Structured Output", time.Since(t0), resp.Usage)
 
 	content := strings.TrimSpace(resp.OutputText())
 	if content == "" {
@@ -498,6 +511,7 @@ func (p *Parser) callChatCompletion(
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
+	t0 := time.Now()
 
 	label := "Structured Output"
 	responseFormat := openai.ChatCompletionNewParamsResponseFormatUnion{
@@ -525,6 +539,8 @@ func (p *Parser) callChatCompletion(
 	if err != nil {
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
+	logLLMUsage("交易/"+label, time.Since(t0),
+		completion.Usage.PromptTokens, completion.Usage.CompletionTokens, completion.Usage.PromptTokensDetails.CachedTokens)
 
 	if len(completion.Choices) == 0 {
 		return nil, history, fmt.Errorf("empty choices in LLM response")
@@ -662,7 +678,14 @@ type extraKV struct {
 func parseTransactionDataJSON(response string) (*beancount.TransactionData, error) {
 	var raw transactionDataRaw
 	if err := json.Unmarshal([]byte(response), &raw); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+		// 宽容单元素数组包裹（部分模型在续写轮会把对象包成 [ {...} ]）：
+		// 直接收编，省掉一次重试往返。空数组/纯 schema 回显在下方空值检查中仍会被拒。
+		var arr []transactionDataRaw
+		if aerr := json.Unmarshal([]byte(response), &arr); aerr != nil || len(arr) != 1 {
+			return nil, fmt.Errorf("failed to unmarshal JSON: %w", err)
+		}
+		logger.Warnf("交易 JSON 被单元素数组包裹，已宽容解析")
+		raw = arr[0]
 	}
 
 	extra, err := parseExtra(raw.Extra)
@@ -672,7 +695,7 @@ func parseTransactionDataJSON(response string) (*beancount.TransactionData, erro
 
 	transactionData := &beancount.TransactionData{
 		DateTime:          raw.DateTime,
-		Flag:              raw.Flag,
+		Flag:              normalizeTxnFlag(raw.Flag),
 		Payee:             raw.Payee,
 		Narration:         raw.Narration,
 		Tags:              raw.Tags,
@@ -681,8 +704,54 @@ func parseTransactionDataJSON(response string) (*beancount.TransactionData, erro
 		Extra:             extra,
 		SpecialDirectives: raw.SpecialDirectives,
 	}
+	for i := range transactionData.Postings {
+		transactionData.Postings[i].Flag = normalizePostingFlag(transactionData.Postings[i].Flag)
+	}
+	if dropped := dropInvalidExtraKeys(transactionData.Extra); len(dropped) > 0 {
+		logger.Warnf("丢弃不符合账本写入规则的 extra 键: %v", dropped)
+	}
 
 	return transactionData, nil
+}
+
+// beancount flag 只允许单个标记字符；部分模型会把 OpenAI 习惯的 "auto" 等词填入。
+func normalizeTxnFlag(f string) string {
+	if len(f) == 1 && strings.ContainsAny(f, "*!?#") {
+		return f
+	}
+	return "*"
+}
+
+func normalizePostingFlag(f string) string {
+	if f == "" {
+		return ""
+	}
+	if len(f) == 1 && strings.ContainsAny(f, "*!?#") {
+		return f
+	}
+	return ""
+}
+
+// extraKeyPattern 与 beancount 包 metadataKeyPattern 一致（写账本时的校验规则，
+// 该正则未导出，此处复刻避免非法键导致整笔确认失败）。
+var extraKeyPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+
+// 与顶层字段重名的 extra 键会破坏账本结构，一并剔除（提示词已有同规则，此为代码兜底）。
+var topLevelExtraKeys = map[string]bool{
+	"datetime": true, "flag": true, "payee": true, "narration": true,
+	"tags": true, "postings": true, "order_id": true, "extra": true, "special_directives": true,
+}
+
+// dropInvalidExtraKeys 删除不合法的 extra 键，返回被删键列表。
+func dropInvalidExtraKeys(extra map[string]string) []string {
+	var dropped []string
+	for k := range extra {
+		if !extraKeyPattern.MatchString(k) || topLevelExtraKeys[k] {
+			delete(extra, k)
+			dropped = append(dropped, k)
+		}
+	}
+	return dropped
 }
 
 func parseExtra(raw json.RawMessage) (map[string]string, error) {

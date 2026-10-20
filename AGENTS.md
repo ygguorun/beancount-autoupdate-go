@@ -6,7 +6,7 @@ Guidance for coding agents operating in `beancount-autoupdate/go`.
 
 - Language: Go (`go 1.24.0`, toolchain `go1.24.2`).
 - Entry point: `cmd/main.go`.
-- Core packages live in `internal/` (`beancount`, `config`, `git`, `httpingest`, `llm`, `logger`, `telegram`, `webdav`, `embed`).
+- Core packages live in `internal/` (`beancount`, `config`, `git`, `httpingest`, `ledgercli`, `llm`, `logger`, `telegram`, `webdav`, `embed`).
 - Build orchestration is Makefile-first; direct `go` commands also work.
 - Logging is centralized through `internal/logger` (logrus wrapper).
 - Config is TOML + env override (`config.toml`, `.env`, env vars).
@@ -43,6 +43,8 @@ Use these from repository root (`/Users/rain/Desktop/code/beancount-autoupdate/g
 - There are baseline unit tests under `internal/beancount`, `internal/config`, and `internal/llm`.
 - Add new tests package-locally under corresponding `internal/<pkg>/` directories.
 - HTTP upload ingest is available under `internal/httpingest` and is wired from `cmd/main.go` when `[http_server].enabled = true`.
+- `internal/ledgercli` wraps the `rledger` CLI (query seeds / check gate / `query_ledger` tool loop). The tool-exploration recognition path (`[llm].tools_enabled`, default false in 0.7.0) lives in `internal/llm/runbooking.go` + `internal/ledgercli/recognize.go`.
+- `test/` holds manual e2e tests (`go test ./...` auto-skips without flags): `make test-e2e IMAGE=...` and `make test-regset` (real LLM calls; regression screenshots live in gitignored `testdata/regset/`).
 
 ### CI checks
 

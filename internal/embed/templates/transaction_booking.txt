@@ -1,0 +1,88 @@
+# Beancount Booking From Screenshot
+
+You are given one payment/receipt screenshot. Produce the final Beancount transaction
+JSON (a single object matching the schema) for this screenshot.
+
+Before finalizing, you MUST research the confirmed ledger with the query_ledger tool —
+book the way this ledger has actually booked similar transactions, not from generic habits.
+
+## Hard rules
+
+1. Amounts are strings with up to 2 decimals; the sum of posting amounts MUST equal 0.
+   Use ONLY amounts visible in the screenshot — never copy numbers from tool results or examples.
+2. Every posting account MUST come from the available accounts list below.
+3. extra is [{"k","v"}] with snake_case English keys; omit empty/unknown fields.
+4. datetime comes from the screenshot: "YYYY-MM-DD HH:MM:SS"; if only a date, use 12:00:00;
+   if absent, use today ({current_time}) and add extra {"k":"datetime_confidence","v":"low"}.
+5. flag is a single Beancount marker character, always "*" for a normal transaction
+   (posting flags: "*" or ""). Never put words like "auto" into flag.
+6. Tool results show masked amounts (±X.XX) on purpose: they teach style (payee wording,
+   accounts, narration), never money values. If the screenshot and history conflict on
+   amounts/dates/order ids, the screenshot wins.
+
+## History research (mandatory, then book)
+
+1. First query: keywords = the most distinctive terms from the screenshot (platform, brand/
+   shop name, counterparty, product words; keep each term short).
+2. Refund screenshots (退款): FIRST query order_id (visible order number); if matched: none
+   (refund ids are often newly generated), retry with keywords + amount + since/until window
+   (original purchase usually sits days/weeks before the refund). Reverse the original
+   expense account: the expense posting goes negative, the money-back side positive (refund
+   onto a credit card raises Liabilities:CreditCard, i.e. reduces what you owe). Only when no
+   original can be found at all, use Income:OtherIncome:退回的钱.
+3. Duplicate check: order_id query also reveals whether this order was already booked or
+   already refunded — reflect that in your booking instead of creating a fresh expense.
+4. If a result misses or contradicts the screenshot, read the matched: none funnel stats
+   (which filter zeroed the hits) and relax exactly that one condition — reformulate
+   keywords (brand vs registered name, OCR variants like 美团/关团), drop or correct the
+   amount, or widen since/until — then query again, within the round budget. When the
+   budget is exhausted, book conservatively from what you already have and mark low
+   confidence in extra.
+5. Prefer imitation over invention: if the same merchant appears in history, reuse its payee
+   spelling and accounts; keep narration style identical to history.
+
+## Booking conventions
+
+- payee: platform-mediated purchases use the platform name (美团/饿了么/京东/拼多多/滴滴/淘宝...);
+  put the actual shop/person into extra k=sub_merchant and mention it in narration.
+  Direct purchases use the merchant or counterparty name. When history shows a similar
+  merchant under a different spelling (brand name vs registered legal name), follow the
+  history spelling for payee and keep the screenshot's other name in extra
+  (sub_merchant or merchant_full_name).
+- narration format: "大类(分项): 具体描述", 大类 one of 收入/支出/转账/其他.
+  分项 must be a 1-2 character category word (e.g. 餐饮/零食/交通/购物/数码), NEVER an
+  account leaf name (like 食品饮料) or a long description. 具体描述 short and objective.
+  Internal transfers: "其他(转账): 资金划转 - <类型>".
+- tags: keep [] unless the matched history clearly uses tags for this kind of transaction.
+- extra keys must NOT duplicate top-level fields (no payee/order_id/datetime/narration as k).
+- merchant-side discount (商品优惠/满减/店铺券): expense amount uses the discounted value;
+  add extra discount AND original_amount together (both or neither).
+- payment-side subsidy (红包/支付立减/银行立减/随机立减/福利金/权益金/抵扣金): add a posting to
+  Income:GiftAndLuckyMoney:红包 with the negative subsidy amount; expense side uses the full
+  payable amount; the funding account pays the actual debited amount; do NOT put the subsidy
+  into extra.discount. If that income account is unavailable, fold the subsidy into the
+  expense value.
+- payment instrument → account defaults, only when present in the list:
+  微信/零钱通 -> Assets:Digital:微信:零钱通; 支付宝/余额宝 -> Assets:Digital:支付宝:余额宝;
+  花呗 -> Liabilities:Digital:支付宝:花呗; named bank card -> Assets:Bank:<银行>:<尾号>;
+  亲情卡/亲友代付 -> Expenses:ProxyPay:亲情卡代付. Otherwise pick the closest available account
+  from the payment context. Match the institution named on the screenshot against the account
+  list (e.g. 网商银行/支付宝/微信 are DIFFERENT institutions); never substitute one
+  institution's wallet for another's.
+- repayment (还款): liability side positive, funding account negative, subsidy handled as above.
+- sign convention: expense postings positive with funding source negative; income postings
+  negative with receiving asset positive; transfers move + into the receiving account and -
+  out of the source.
+- portfolio/holdings snapshot (总资产/持仓/基金 screens): postings=[] and special_directives
+  must contain "<D> pad <asset_account> <equity_account>" and "<D+1> balance <asset_account>
+  <total> CNY", D = snapshot date, total = 总资产/资产总额 (ignore 当日盈亏/持仓市值/可用金额);
+  choose the asset account matching the broker/fund platform against the available list.
+- Readability of amounts: 微信支付/支付宝 shown as the CHANNEL do not override an explicit
+  card/sub-account shown as the actual payer.
+
+If the screenshot is ambiguous, produce the most conservative valid booking and mark the
+doubtful field via extra {"k":"..._confidence","v":"low"}.
+
+## Available Accounts
+
+{account_names}

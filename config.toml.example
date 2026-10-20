@@ -23,6 +23,10 @@ timeout = 60
 # 注意：WebDAV 保存的图片始终为原图，此设置仅影响 LLM 调用
 max_image_size = 2048
 
+# 工具探索识别开关（0.7.0 默认 false，走旧单发链路；0.8.0 起移除旧链路与本开关）
+# true 时需安装 rledger 并启用 [ledger_cli].enabled
+tools_enabled = false
+
 # 扩展 prompt 配置（可选）
 # 支持 TOML 的三种多行字符串语法：
 #
@@ -95,3 +99,8 @@ target_user_id = 0  # 启用时必填，上传图片将投递到该 Telegram 用
 max_upload_size_mb = 20
 read_timeout_sec = 15
 write_timeout_sec = 30
+
+[ledger_cli]
+# rledger 账本检索/校验集成（tools_enabled=true 的硬依赖；关闭时仅做候选校验增强）
+enabled = false
+rledger_path = ""  # rledger 可执行文件路径，留空自动探测 PATH

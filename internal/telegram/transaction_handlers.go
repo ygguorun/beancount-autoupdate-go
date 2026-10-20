@@ -97,7 +97,7 @@ func (b *Bot) processImageCore(userID int, tempFile string, fileExt string, sour
 			len(accounts[beancount.AccountTypeIncome]))
 
 		var history []beancount.ConversationMessage
-		parseResult, history, parseErr = b.llmParser.ParseImageWithHistory(tempFile, allAccounts, nil, "")
+		parseResult, history, parseErr = b.recognizeFirstPass(tempFile, allAccounts)
 		switch {
 		case parseErr != nil:
 			logger.Errorf("LLM 解析失败: %v", parseErr)

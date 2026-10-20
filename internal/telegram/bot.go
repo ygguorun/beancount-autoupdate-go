@@ -9,6 +9,7 @@ import (
 	"beancount-autoupdate/internal/beancount"
 	"beancount-autoupdate/internal/config"
 	"beancount-autoupdate/internal/git"
+	"beancount-autoupdate/internal/ledgercli"
 	"beancount-autoupdate/internal/llm"
 	"beancount-autoupdate/internal/logger"
 	"beancount-autoupdate/internal/webdav"
@@ -23,6 +24,7 @@ type Bot struct {
 	llmParser       *llm.Parser
 	gitMgr          *git.Manager
 	webdavMgr       *webdav.Manager
+	ledger          *ledgercli.Executor
 	botAPI          *tgbotapi.BotAPI
 	pendingTx       map[int]map[string]*beancount.PendingTransaction // userID -> transactionID -> PendingTransaction
 	confirmingTx    map[int]map[string]struct{}
@@ -41,6 +43,7 @@ func NewBot(
 	llmParser *llm.Parser,
 	gitMgr *git.Manager,
 	webdavMgr *webdav.Manager,
+	ledgerExec *ledgercli.Executor,
 ) (*Bot, error) {
 	botAPI, err := tgbotapi.NewBotAPI(cfg.Telegram.Token)
 	if err != nil {
@@ -55,6 +58,7 @@ func NewBot(
 		llmParser:       llmParser,
 		gitMgr:          gitMgr,
 		webdavMgr:       webdavMgr,
+		ledger:          ledgerExec,
 		botAPI:          botAPI,
 		pendingTx:       make(map[int]map[string]*beancount.PendingTransaction),
 		waitingForInput: make(map[int]map[string]string),

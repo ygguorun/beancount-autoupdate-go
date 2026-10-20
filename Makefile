@@ -48,6 +48,16 @@ run:
 	@echo "运行程序..."
 	$(GORUN) $(CMD_DIR)/main.go
 
+.PHONY: test-e2e
+test-e2e:
+	@echo "端到端识别测试（真实 LLM 调用）..."
+	$(GOCMD) test -v ./test/ -run E2E -timeout 30m -image $(IMAGE) $(ARGS)
+
+.PHONY: test-regset
+test-regset:
+	@echo "回归集打分（真实 LLM 调用，只读账本）..."
+	$(GOCMD) test -v ./test/ -run Regset -timeout 90m -regset ../testdata/regset $(ARGS)
+
 # 构建
 .PHONY: build
 build:
@@ -159,6 +169,8 @@ help:
 	@echo "  make all          - 清理、下载依赖并构建"
 	@echo "  make deps         - 下载依赖"
 	@echo "  make run          - 运行程序"
+	@echo "  make test-e2e IMAGE=\"截图.png\" - 端到端识别测试（真实 LLM 调用；ARGS="-tools [-guidance ...]"）"
+	@echo "  make test-regset ARGS=\"-tools\" - 回归集打分（testdata/regset，真实 LLM 调用）"
 	@echo "  make build        - 构建程序"
 	@echo "  make build-all    - 构建所有平台"
 	@echo "  make test         - 运行测试"

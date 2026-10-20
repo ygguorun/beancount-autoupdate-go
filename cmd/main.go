@@ -14,6 +14,7 @@ import (
 	"beancount-autoupdate/internal/embed"
 	"beancount-autoupdate/internal/git"
 	"beancount-autoupdate/internal/httpingest"
+	"beancount-autoupdate/internal/ledgercli"
 	"beancount-autoupdate/internal/llm"
 	"beancount-autoupdate/internal/logger"
 	"beancount-autoupdate/internal/telegram"
@@ -131,6 +132,16 @@ func main() {
 		cfg.LLM.MaxImageSize,
 	)
 
+	// 初始化 rledger 账本种子/校验执行器（可选功能：[ledger_cli].enabled）
+	var ledgerExec *ledgercli.Executor
+	if cfg.LedgerCLI.Enabled {
+		ledgerExec = ledgercli.New(
+			cfg.LedgerCLI.RledgerPath,
+			beancountMgr.MainFilePath(),
+			cfg.Beancount.OperatingCurrency,
+		)
+	}
+
 	// 初始化 WebDAV 管理器（如果启用）
 	var webdavMgr *webdav.Manager
 	if cfg.WebDAV.Enabled {
@@ -162,6 +173,7 @@ func main() {
 		llmParser,
 		gitMgr,
 		webdavMgr,
+		ledgerExec,
 	)
 	if err != nil {
 		logger.Fatalf("初始化 Telegram Bot 失败: %v", err)
