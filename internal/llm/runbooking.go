@@ -73,7 +73,7 @@ func queryLedgerToolSpec() openai.ChatCompletionToolUnionParam {
 				"keywords": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "1~3 个检索词（商户/平台/人名/商品词，可用 OCR 变体拼写），匹配 payee 与 narration",
+					"description": "1~3 个检索词（商户/平台/人名/商品/机构账户名，可用 OCR 变体拼写），匹配 payee、narration 与 account；机构名可命中 pad 对账史（渲染为 '日期 pad 科目A 科目B'）",
 				},
 				"order_id": map[string]any{
 					"type":        "string",

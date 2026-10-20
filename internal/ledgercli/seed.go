@@ -64,6 +64,24 @@ func RenderSeeds(seeds []TxnSeed) string {
 
 	var b strings.Builder
 	for _, s := range seeds {
+		if strings.TrimSpace(s.Payee+s.Narration) == "" {
+			// 非交易指令（pad 等）：还原原始指令形态；指令本身不含金额，无余额泄出。
+			directive := "entry"
+			if len(s.Postings) > 0 {
+				switch s.Postings[0].Flag {
+				case "P":
+					directive = "pad"
+				case "B":
+					directive = "balance"
+				}
+			}
+			accounts := make([]string, 0, len(s.Postings))
+			for _, p := range s.Postings {
+				accounts = append(accounts, p.Account)
+			}
+			fmt.Fprintf(&b, "%s %s %s\n", s.Date, directive, strings.Join(accounts, " "))
+			continue
+		}
 		fmt.Fprintf(&b, "%s %s %s\n", s.Date, s.Payee, s.Narration)
 		for _, p := range s.Postings {
 			fmt.Fprintf(&b, "  %s %s %s\n", p.Account, maskAmount(p.Amount), p.Currency)

@@ -92,6 +92,7 @@ type Row struct {
 	Payee     string
 	Narration string
 	Account   string
+	Flag      string // entry flag：交易 '*'/'!'，pad 指令 'P'（balance 断言 BQL 不可见）
 	Amount    string // 原始金额，仅在外部脱敏后使用，禁止直接进 LLM 上下文
 	Currency  string
 }
@@ -111,14 +112,15 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		where = append(where, fmt.Sprintf("any_meta('order-id') = '%s'", f.OrderID))
 	} else {
 		// 关键词组之间 OR（命中任一即可——若 AND，平台交易+新店名必然查空），
-		// account/date 过滤条件与关键词组整体 AND。
+		// account/date 过滤条件与关键词组整体 AND。account 维度同样参与 OR：
+		// pad/balance 等指令没有 payee/narration，机构类关键词只能经科目名命中对账史。
 		kwConds := make([]string, 0, 3)
 		for _, kw := range f.Keywords {
 			if len(kwConds) >= 3 {
 				break
 			}
 			if s := sanitizeKeyword(kw); s != "" {
-				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s'", s, s))
+				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR account ~ '%s'", s, s, s))
 			}
 		}
 		if len(kwConds) == 0 {
@@ -163,7 +165,7 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		rowsCap = 500
 	}
 
-	q := fmt.Sprintf("SELECT date, payee, narration, account, position WHERE %s ORDER BY date DESC LIMIT %d",
+	q := fmt.Sprintf("SELECT date, payee, narration, account, flag, position WHERE %s ORDER BY date DESC LIMIT %d",
 		strings.Join(where, " AND "), rowsCap)
 
 	out, stderr, err := e.run("query", e.mainFile, "-f", "json", q)
@@ -191,6 +193,7 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 			Payee:     cellString(cellAt(r, idx, "payee")),
 			Narration: cellString(cellAt(r, idx, "narration")),
 			Account:   cellString(cellAt(r, idx, "account")),
+			Flag:      cellString(cellAt(r, idx, "flag")),
 		}
 		var pos struct {
 			Units struct {
