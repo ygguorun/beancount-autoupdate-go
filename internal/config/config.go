@@ -20,7 +20,14 @@ type Config struct {
 	Logging    LoggingConfig    `toml:"logging"`
 	WebDAV     WebDAVConfig     `toml:"webdav"`
 	HTTPServer HTTPServerConfig `toml:"http_server"`
+	LedgerCLI  LedgerCLIConfig  `toml:"ledger_cli"`
 	projectDir string
+}
+
+// LedgerCLIConfig rledger 账本种子检索与校验（可选功能，默认关闭）
+type LedgerCLIConfig struct {
+	Enabled     bool   `toml:"enabled"`
+	RledgerPath string `toml:"rledger_path"` // rledger 可执行文件路径，留空自动探测 PATH
 }
 
 // TelegramConfig Telegram Bot 配置
@@ -38,6 +45,7 @@ type LLMConfig struct {
 	Timeout      int    `toml:"timeout"`
 	ExtendPrompt string `toml:"extend_prompt"`  // 额外的 prompt，可以是 "append" 或 "replace"
 	MaxImageSize int    `toml:"max_image_size"` // 图片最大尺寸限制（宽度或高度），0 表示不限制
+	ToolsEnabled bool   `toml:"tools_enabled"`  // 工具探索识别：单会话内模型自主调用 query_ledger 检索账本历史
 }
 
 // BeancountConfig Beancount 配置

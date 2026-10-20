@@ -196,6 +196,11 @@ func (m *Manager) GetAccountFile(accountType AccountType) string {
 	return filepath.Join(m.accountDir, fileMap[accountType])
 }
 
+// MainFilePath 返回账本主入口文件（main.bean）路径，供 rledger 等外部工具引用
+func (m *Manager) MainFilePath() string {
+	return m.mainFile
+}
+
 // GetTransactionFilePath 根据日期获取交易文件路径
 func (m *Manager) GetTransactionFilePath(date time.Time) string {
 	year := date.Year()
