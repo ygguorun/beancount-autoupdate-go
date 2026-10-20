@@ -448,3 +448,40 @@ type testErr struct {
 func (e *testErr) Error() string {
 	return e.msg
 }
+
+func TestParseResponseNormalization(t *testing.T) {
+	p := &Parser{}
+	const body = `{"datetime":"2026-10-01 18:00:00","flag":"auto","payee":"a","narration":"b",` +
+		`"tags":[],"postings":[{"account":"X","amount":"1.00","currency":"CNY","flag":"auto"}],` +
+		`"order_id":"","extra":[{"k":"收单机构","v":"招商银行"},{"k":"order_note","v":"ok"}],"special_directives":[]}`
+
+	txn, err := p.parseResponse(body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if txn.Flag != "*" {
+		t.Errorf("txn.Flag = %q, want *", txn.Flag)
+	}
+	if txn.Postings[0].Flag != "" {
+		t.Errorf("posting.Flag = %q, want empty", txn.Postings[0].Flag)
+	}
+	if _, ok := txn.Extra["收单机构"]; ok {
+		t.Error("非法 extra 键未被剔除")
+	}
+	if txn.Extra["order_note"] != "ok" {
+		t.Error("合法 extra 键被误删")
+	}
+
+	// 单元素数组包裹：宽容收编
+	wrapped := `[` + body + `]`
+	if _, err := p.parseResponse(wrapped); err != nil {
+		t.Errorf("单元素数组应可解析: %v", err)
+	}
+	// 空数组与 schema 回显：仍须拒绝
+	if _, err := p.parseResponse(`[]`); err == nil {
+		t.Error("空数组应解析失败")
+	}
+	if _, err := p.parseResponse(`[{"properties":{},"required":[]}]`); err == nil {
+		t.Error("schema 回显应解析失败")
+	}
+}
