@@ -340,7 +340,7 @@ func (b *Bot) rerunRecognition(userID int, transactionID string, messageID int) 
 	accounts := b.beancountMgr.GetAllCategories()
 	allAccounts := allAvailableAccounts(accounts)
 
-	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(data.OriginalTempFilePath, allAccounts, nil, "")
+	parseResult, newHistory, err := b.recognizeFirstPass(data.OriginalTempFilePath, allAccounts)
 	if err != nil {
 		logger.Errorf("LLM 重新解析失败: %v", err)
 		b.saveFailedHistory(userID, transactionID, newHistory)
@@ -504,12 +504,12 @@ func (b *Bot) handleGuidanceInput(userID int, transactionID string, guidance str
 	accounts := b.beancountMgr.GetAllCategories()
 	allAccounts := allAvailableAccounts(accounts)
 
-	// 使用带引导的解析方法
-	parseResult, newHistory, err := b.llmParser.ParseImageWithHistory(
+	// 使用带引导的解析方法（tools 模式为可探索续写，见 guidanceRecognize）
+	parseResult, newHistory, err := b.guidanceRecognize(
+		guidance,
+		data.ConversationHistory,
 		data.OriginalTempFilePath,
 		allAccounts,
-		data.ConversationHistory,
-		guidance,
 	)
 	if err != nil {
 		logger.Errorf("引导重试失败: %v", err)
