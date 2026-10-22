@@ -77,12 +77,12 @@ func (e *Executor) Available() bool { return e != nil && e.bin != "" }
 
 // QueryFilter 结构化查询条件。
 type QueryFilter struct {
-	Keywords      []string // 匹配 payee/narration，最多取 3 个
+	Keywords      []string // 匹配 payee/narration，不限个数
 	OrderID       string   // 可选；非空时按 metadata order-id 精确检索，忽略 Keywords
 	AccountPrefix string   // 可选，科目前缀
 	Since         string   // 可选，起始月 YYYY-MM
 	Until         string   // 可选，结束月 YYYY-MM（含）
-	Limit         int      // 交易笔数，钳制到 [1,5]，默认 3
+	Limit         int      // 交易笔数，钳制到 [1,10]，默认 5
 	MaxRows       int      // 可选，原始分录行上限；金额后过滤等宽检索场景调大（默认 limit*3，封顶 500）
 }
 
@@ -114,11 +114,8 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		// 关键词组之间 OR（命中任一即可——若 AND，平台交易+新店名必然查空），
 		// account/date 过滤条件与关键词组整体 AND。account 维度同样参与 OR：
 		// pad/balance 等指令没有 payee/narration，机构类关键词只能经科目名命中对账史。
-		kwConds := make([]string, 0, 3)
+		kwConds := make([]string, 0, len(f.Keywords))
 		for _, kw := range f.Keywords {
-			if len(kwConds) >= 3 {
-				break
-			}
 			if s := sanitizeKeyword(kw); s != "" {
 				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR account ~ '%s'", s, s, s))
 			}
@@ -153,9 +150,9 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 	limit := f.Limit
 	switch {
 	case limit <= 0:
-		limit = 3
-	case limit > 5:
 		limit = 5
+	case limit > 10:
+		limit = 10
 	}
 	rowsCap := limit * 3
 	if f.MaxRows > rowsCap {
