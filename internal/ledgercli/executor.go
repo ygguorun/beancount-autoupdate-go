@@ -27,6 +27,11 @@ const (
 	// maxRunTimeout 单次 rledger 调用超时。本地进程通常毫秒级，
 	// 但 Windows scoop shim 冷启动 + 全账本首次加载留足冗余。
 	maxRunTimeout = 15 * time.Second
+	// maxQueryRows BQL 行窗固定值。进 LLM 的量由 交易笔数钳制 + RenderSeeds 字节预算
+	// + ToolLoop 会话预算 三道闸卡死，行窗只是防高频关键词（如"微信"）拉全史
+	// 撑大 JSON 序列化/解析的保险丝；has_account 使每交易行数翻倍后，
+	// limit*3 的浅窗会凑不齐 limit 笔完整交易，故固定而不随 limit 缩放。
+	maxQueryRows = 500
 	// snippetFirstLine 校验临时文件中片段的起始行号（1 include，2 空行）。
 	snippetFirstLine = 3
 )
@@ -77,13 +82,12 @@ func (e *Executor) Available() bool { return e != nil && e.bin != "" }
 
 // QueryFilter 结构化查询条件。
 type QueryFilter struct {
-	Keywords      []string // 匹配 payee/narration，最多取 3 个
+	Keywords      []string // 匹配 payee/narration，不限个数
 	OrderID       string   // 可选；非空时按 metadata order-id 精确检索，忽略 Keywords
 	AccountPrefix string   // 可选，科目前缀
 	Since         string   // 可选，起始月 YYYY-MM
 	Until         string   // 可选，结束月 YYYY-MM（含）
-	Limit         int      // 交易笔数，钳制到 [1,5]，默认 3
-	MaxRows       int      // 可选，原始分录行上限；金额后过滤等宽检索场景调大（默认 limit*3，封顶 500）
+	Limit         int      // 交易笔数，钳制到 [1,10]，默认 5
 }
 
 // Row 一条账本分录（展平行）。
@@ -112,15 +116,13 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		where = append(where, fmt.Sprintf("any_meta('order-id') = '%s'", f.OrderID))
 	} else {
 		// 关键词组之间 OR（命中任一即可——若 AND，平台交易+新店名必然查空），
-		// account/date 过滤条件与关键词组整体 AND。account 维度同样参与 OR：
-		// pad/balance 等指令没有 payee/narration，机构类关键词只能经科目名命中对账史。
-		kwConds := make([]string, 0, 3)
+		// account/date 过滤条件与关键词组整体 AND。科目维度用 has_account（entry 级，
+		// 命中即返回整笔交易全部分录）而非 account ~（行级，会把配对科目切掉——
+		// pad/balance 对账史只有两边同框才教得出对手科目）。
+		kwConds := make([]string, 0, len(f.Keywords))
 		for _, kw := range f.Keywords {
-			if len(kwConds) >= 3 {
-				break
-			}
 			if s := sanitizeKeyword(kw); s != "" {
-				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR account ~ '%s'", s, s, s))
+				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR has_account('%s')", s, s, s))
 			}
 		}
 		if len(kwConds) == 0 {
@@ -132,41 +134,27 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		where = append(where, fmt.Sprintf("account ~ '%s'", p))
 	}
 	// 日期字面量必须不带引号（实测 `date >= '2026-05-01'` 报 cannot compare values）
-	if f.Since != "" {
-		if bqlMonthRe.MatchString(f.Since) {
-			where = append(where, fmt.Sprintf("date >= %s-01", f.Since))
-		} else {
-			logger.Warnf("忽略格式非法的 since（应为 YYYY-MM）: %q", f.Since)
+	for _, b := range []struct{ op, v string }{{"since", strings.TrimSpace(f.Since)}, {"until", strings.TrimSpace(f.Until)}} {
+		if b.v == "" {
+			continue
 		}
-	}
-	if f.Until != "" {
-		if bqlMonthRe.MatchString(f.Until) {
-			end, err := time.Parse("2006-01", f.Until)
-			if err == nil {
-				where = append(where, fmt.Sprintf("date < %s", end.AddDate(0, 1, 1).Format("2006-01-02")))
-			}
+		if c, ok := bqlDateCond(b.op, b.v); ok {
+			where = append(where, c)
 		} else {
-			logger.Warnf("忽略格式非法的 until（应为 YYYY-MM）: %q", f.Until)
+			logger.Warnf("忽略格式非法的 %s（应为 YYYY-MM 或 YYYY-MM-DD）: %q", b.op, b.v)
 		}
 	}
 
 	limit := f.Limit
 	switch {
 	case limit <= 0:
-		limit = 3
-	case limit > 5:
 		limit = 5
-	}
-	rowsCap := limit * 3
-	if f.MaxRows > rowsCap {
-		rowsCap = f.MaxRows
-	}
-	if rowsCap > 500 {
-		rowsCap = 500
+	case limit > 10:
+		limit = 10
 	}
 
 	q := fmt.Sprintf("SELECT date, payee, narration, account, flag, position WHERE %s ORDER BY date DESC LIMIT %d",
-		strings.Join(where, " AND "), rowsCap)
+		strings.Join(where, " AND "), maxQueryRows)
 
 	out, stderr, err := e.run("query", e.mainFile, "-f", "json", q)
 	if err != nil {
@@ -430,8 +418,37 @@ var (
 	// ponytail: 若将来需要精确匹配，改用 `-f json` 查询的转义透传并补测试。
 	bqlStripRe = regexp.MustCompile(`['"\\\r\n\t]`)
 	bqlMetaRe  = regexp.MustCompile(`[\^\$\.\*\+\?\(\)\[\]\{\}\|]`)
-	bqlMonthRe = regexp.MustCompile(`^\d{4}-\d{2}$`)
+	bqlDateRe  = regexp.MustCompile(`^(\d{4})-(\d{2})(?:-(\d{2}))?$`)
 )
+
+// bqlDateCond 把一个 since/until 取值（YYYY-MM 或 YYYY-MM-DD，两端含）翻译成 BQL
+// 日期边界子句；ok=false 表示格式非法（含 2026-02-30 这类归一化会静默漂移的假日）。
+// 月格式展开为整月：since 取当月 1 号，until 取次月 1 号（date < 上界）。
+func bqlDateCond(op, v string) (string, bool) {
+	m := bqlDateRe.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day := 1
+	if m[3] != "" {
+		day, _ = strconv.Atoi(m[3])
+	}
+	d := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	if d.Year() != year || int(d.Month()) != month || d.Day() != day {
+		return "", false // time.Date 会把假日归一化到下月，必须回验
+	}
+	if op == "until" {
+		if m[3] == "" {
+			d = d.AddDate(0, 1, 0) // 月格式：含整月 → 次月 1 号上界
+		} else {
+			d = d.AddDate(0, 0, 1) // 日格式：含当天 → 次日 上界
+		}
+		return fmt.Sprintf("date < %s", d.Format("2006-01-02")), true
+	}
+	return fmt.Sprintf("date >= %s", d.Format("2006-01-02")), true
+}
 
 func sanitizeKeyword(k string) string {
 	k = bqlStripRe.ReplaceAllString(k, "")

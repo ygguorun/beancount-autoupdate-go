@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -70,8 +71,10 @@ func (tl *ToolLoop) run(a toolArgs) string {
 		return errJSON("keywords 或 order_id 至少要提供一个")
 	}
 	for name, v := range map[string]string{"since": strings.TrimSpace(a.Since), "until": strings.TrimSpace(a.Until)} {
-		if v != "" && !bqlMonthRe.MatchString(v) {
-			return errJSON(name + " 需为 YYYY-MM 格式")
+		if v != "" {
+			if _, ok := bqlDateCond(name, v); !ok {
+				return errJSON(name + " 需为 YYYY-MM 或 YYYY-MM-DD")
+			}
 		}
 	}
 
@@ -88,30 +91,43 @@ func (tl *ToolLoop) run(a toolArgs) string {
 	limit := a.Limit
 	switch {
 	case limit <= 0:
-		limit = 3
-	case limit > 5:
 		limit = 5
+	case limit > 10:
+		limit = 10
 	}
-	rowsMax := 0
-	if hasAmount && orderID == "" {
-		// 金额是 Go 端后过滤：窄窗（limit*3 行、近端优先）会把老原单误报为查无
-		rowsMax = 300
-	}
-
-	rows, err := tl.e.Query(QueryFilter{
+	base := QueryFilter{
 		Keywords:      a.Keywords,
 		OrderID:       orderID,
 		AccountPrefix: a.AccountPrefix,
 		Since:         strings.TrimSpace(a.Since),
 		Until:         strings.TrimSpace(a.Until),
 		Limit:         limit,
-		MaxRows:       rowsMax,
-	})
-	if err != nil {
-		return errJSON("查询失败: " + err.Error())
 	}
 
-	g0 := GroupRows(rows, 50)
+	var g0 []TxnSeed
+	if orderID == "" && len(base.Keywords) > 1 {
+		// 多关键词逐词检索再合并排序：单条 OR 全局窗按日期截行，高频词行海会把
+		// 老的全命中记录挤出候选池（模型只能换词重查一轮）；逐词窗口给每个词自己
+		// 的新鲜度，命中词数多的交易提顶，词序（模型给出的特指顺序）决定回填次序。
+		// 单关键词路径与 order_id 路径保持原单次查询不变。
+		lists := make([][]TxnSeed, 0, len(base.Keywords))
+		for _, kw := range base.Keywords {
+			kf := base
+			kf.Keywords = []string{kw}
+			rows, err := tl.e.Query(kf)
+			if err != nil {
+				return errJSON("查询失败: " + err.Error())
+			}
+			lists = append(lists, GroupRows(rows, 50))
+		}
+		g0 = mergeKeywordLists(lists)
+	} else {
+		rows, err := tl.e.Query(base)
+		if err != nil {
+			return errJSON("查询失败: " + err.Error())
+		}
+		g0 = GroupRows(rows, 50)
+	}
 	g1 := g0
 	if hasAmount {
 		g1 = g0[:0:0]
@@ -159,6 +175,47 @@ func (tl *ToolLoop) run(a toolArgs) string {
 
 // OutputUsed 已消耗的工具输出字节数（日志观测用）。
 func (tl *ToolLoop) OutputUsed() int { return tl.outputted }
+
+// mergeKeywordLists 合并逐词检索列表（各列表已按日期倒序）：以
+// (date,payee,narration) 去重，出现在越多关键词列表=覆盖词数越多，提顶；
+// 覆盖相同保持首次出现顺序（即词序）；同键取分录更多的版本——平台词从
+// account 命中只有单边行，同笔交易在商户词列表里是全量分录。
+// ponytail: 覆盖数受逐词窗口深度限制，老记录可能被高频词挤出某词窗口而
+// 少计覆盖——仍在其稀有词自己的列表里，不至于完全隐形；需要精确全命中
+// 分层时给 Query 加 AND 语义。
+func mergeKeywordLists(lists [][]TxnSeed) []TxnSeed {
+	type ranked struct {
+		seed  TxnSeed
+		cover int
+	}
+	index := make(map[[3]string]int)
+	merged := make([]ranked, 0, 32)
+	for _, l := range lists {
+		seenInList := make(map[[3]string]bool) // 同键多笔独立交易（两次刷卡）同列表内只计一次覆盖
+		for _, g := range l {
+			key := [3]string{g.Date, g.Payee, g.Narration}
+			if i, ok := index[key]; ok {
+				if !seenInList[key] {
+					merged[i].cover++
+					seenInList[key] = true
+				}
+				if len(g.Postings) > len(merged[i].seed.Postings) {
+					merged[i].seed = g
+				}
+				continue
+			}
+			index[key] = len(merged)
+			seenInList[key] = true
+			merged = append(merged, ranked{seed: g, cover: 1})
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool { return merged[i].cover > merged[j].cover })
+	out := make([]TxnSeed, 0, len(merged))
+	for _, r := range merged {
+		out = append(out, r.seed)
+	}
+	return out
+}
 
 // groupHasAmount 交易内任一分录的绝对值与目标金额相差 <0.005。
 func groupHasAmount(g TxnSeed, amount float64) bool {

@@ -62,7 +62,7 @@ func queryLedgerToolSpec() openai.ChatCompletionToolUnionParam {
 	return openai.ChatCompletionFunctionTool(shared.FunctionDefinitionParam{
 		Name: "query_ledger",
 		Description: openai.String(
-			"查询已确认账本历史，返回渲染好的交易块文本（金额脱敏为 ±X.XX，最多 5 笔）。" +
+			"查询已确认账本历史，返回渲染好的交易块文本（金额脱敏为 ±X.XX，最多 10 笔）。" +
 				"用途：核对商户既有记账风格；按订单号找退款原单；按金额+关键词找关联/重复记录。" +
 				"order_id 命中时忽略 keywords。查询失败返回 {\"error\":...}；空结果返回 matched: none，" +
 				"并附带各过滤阶段命中统计（关键词→金额→剔除），据此只放宽清零的那一个条件。"),
@@ -73,7 +73,7 @@ func queryLedgerToolSpec() openai.ChatCompletionToolUnionParam {
 				"keywords": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "1~3 个检索词（商户/平台/人名/商品/机构账户名，可用 OCR 变体拼写），匹配 payee、narration 与 account；机构名可命中 pad 对账史（渲染为 '日期 pad 科目A 科目B'）",
+					"description": "检索词，不限个数（商户/平台/人名/商品/机构账户名，可用 OCR 变体拼写），最特指的词放最前——结果优先返回命中词数多的交易，其余按词序与时间新旧排列；匹配 payee、narration 与 account；机构名可命中 pad 对账史（渲染为 '日期 pad 科目A 科目B'）",
 				},
 				"order_id": map[string]any{
 					"type":        "string",
@@ -89,15 +89,15 @@ func queryLedgerToolSpec() openai.ChatCompletionToolUnionParam {
 				},
 				"since": map[string]any{
 					"type":        "string",
-					"description": "可选。起始月 YYYY-MM（含）",
+					"description": "可选。起始日期 YYYY-MM 或 YYYY-MM-DD（含）",
 				},
 				"until": map[string]any{
 					"type":        "string",
-					"description": "可选。结束月 YYYY-MM（含）",
+					"description": "可选。结束日期 YYYY-MM 或 YYYY-MM-DD（含）",
 				},
 				"limit": map[string]any{
 					"type":        "integer",
-					"description": "返回交易笔数 1~5，默认 3",
+					"description": "返回交易笔数 1~10，默认 5",
 				},
 			},
 		},
