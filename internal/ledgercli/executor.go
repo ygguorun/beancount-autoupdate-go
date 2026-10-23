@@ -112,12 +112,13 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		where = append(where, fmt.Sprintf("any_meta('order-id') = '%s'", f.OrderID))
 	} else {
 		// 关键词组之间 OR（命中任一即可——若 AND，平台交易+新店名必然查空），
-		// account/date 过滤条件与关键词组整体 AND。account 维度同样参与 OR：
-		// pad/balance 等指令没有 payee/narration，机构类关键词只能经科目名命中对账史。
+		// account/date 过滤条件与关键词组整体 AND。科目维度用 has_account（entry 级，
+		// 命中即返回整笔交易全部分录）而非 account ~（行级，会把配对科目切掉——
+		// pad/balance 对账史只有两边同框才教得出对手科目）。
 		kwConds := make([]string, 0, len(f.Keywords))
 		for _, kw := range f.Keywords {
 			if s := sanitizeKeyword(kw); s != "" {
-				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR account ~ '%s'", s, s, s))
+				kwConds = append(kwConds, fmt.Sprintf("payee ~ '%s' OR narration ~ '%s' OR has_account('%s')", s, s, s))
 			}
 		}
 		if len(kwConds) == 0 {
