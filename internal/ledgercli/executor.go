@@ -27,6 +27,11 @@ const (
 	// maxRunTimeout 单次 rledger 调用超时。本地进程通常毫秒级，
 	// 但 Windows scoop shim 冷启动 + 全账本首次加载留足冗余。
 	maxRunTimeout = 15 * time.Second
+	// maxQueryRows BQL 行窗固定值。进 LLM 的量由 交易笔数钳制 + RenderSeeds 字节预算
+	// + ToolLoop 会话预算 三道闸卡死，行窗只是防高频关键词（如"微信"）拉全史
+	// 撑大 JSON 序列化/解析的保险丝；has_account 使每交易行数翻倍后，
+	// limit*3 的浅窗会凑不齐 limit 笔完整交易，故固定而不随 limit 缩放。
+	maxQueryRows = 500
 	// snippetFirstLine 校验临时文件中片段的起始行号（1 include，2 空行）。
 	snippetFirstLine = 3
 )
@@ -83,7 +88,6 @@ type QueryFilter struct {
 	Since         string   // 可选，起始月 YYYY-MM
 	Until         string   // 可选，结束月 YYYY-MM（含）
 	Limit         int      // 交易笔数，钳制到 [1,10]，默认 5
-	MaxRows       int      // 可选，原始分录行上限；金额后过滤等宽检索场景调大（默认 limit*3，封顶 500）
 }
 
 // Row 一条账本分录（展平行）。
@@ -155,16 +159,9 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 	case limit > 10:
 		limit = 10
 	}
-	rowsCap := limit * 3
-	if f.MaxRows > rowsCap {
-		rowsCap = f.MaxRows
-	}
-	if rowsCap > 500 {
-		rowsCap = 500
-	}
 
 	q := fmt.Sprintf("SELECT date, payee, narration, account, flag, position WHERE %s ORDER BY date DESC LIMIT %d",
-		strings.Join(where, " AND "), rowsCap)
+		strings.Join(where, " AND "), maxQueryRows)
 
 	out, stderr, err := e.run("query", e.mainFile, "-f", "json", q)
 	if err != nil {

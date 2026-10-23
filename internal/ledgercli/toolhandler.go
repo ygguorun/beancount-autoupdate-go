@@ -93,12 +93,6 @@ func (tl *ToolLoop) run(a toolArgs) string {
 	case limit > 10:
 		limit = 10
 	}
-	rowsMax := 0
-	if hasAmount && orderID == "" {
-		// 金额是 Go 端后过滤：窄窗（limit*3 行、近端优先）会把老原单误报为查无
-		rowsMax = 300
-	}
-
 	base := QueryFilter{
 		Keywords:      a.Keywords,
 		OrderID:       orderID,
@@ -106,7 +100,6 @@ func (tl *ToolLoop) run(a toolArgs) string {
 		Since:         strings.TrimSpace(a.Since),
 		Until:         strings.TrimSpace(a.Until),
 		Limit:         limit,
-		MaxRows:       rowsMax,
 	}
 
 	var g0 []TxnSeed
