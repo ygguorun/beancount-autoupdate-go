@@ -141,7 +141,7 @@ curl -X POST "http://127.0.0.1:8080/v1/receipts" \
 0.7.0 引入、**默认关闭**的可选识别模式。开启后（`[llm].tools_enabled = true` 且 `[ledger_cli].enabled = true`）：
 
 - 单会话流程：`[记账提示词 + 截图] → 模型自主调用 query_ledger 探索（≤5 回合）→ 最终交易 JSON → rledger check 校验闸（问题自动回灌修正一轮）`；
-- `query_ledger` 只暴露意图参数（keywords / order_id / amount / account_prefix / since / until / limit），BQL 形态、LIMIT、历史金额脱敏（±X.XX）由 Go 焊死；账本查询在本机执行，不出网络；
+- `query_ledger` 只暴露意图参数（keywords / order_id / amount / account_prefix / since / until / limit），BQL 形态、LIMIT、历史金额脱敏（±X.XX）由 Go 焊死；账本查询在本机执行，不出网络；科目类关键词按 entry 级命中整笔交易（含 pad 对账史双边），since/until 接受 `YYYY-MM` 或 `YYYY-MM-DD`（两端含）；
 - 引导重试同步升级：续写轮保留探索能力（≤3 回合）并补校验闸；
 - 依赖：服务器需安装 [rledger](https://github.com/rustledger/rustledger)（Linux 可用 `cargo binstall rustledger` 或官方 releases）；未安装时功能自动跳过。
 

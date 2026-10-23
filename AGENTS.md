@@ -28,6 +28,7 @@ Use these from repository root (`/Users/rain/Desktop/code/beancount-autoupdate/g
 - Format code: `make fmt` (runs `go fmt ./...`).
 - Lint code: `make lint` (runs `golangci-lint run ./...` when installed).
 - Recommended local quality gate: `make fmt && make lint && make test`.
+- Windows checkout caveat: this working copy is CRLF (`core.autocrlf=true`), so `gofmt -l .` flags every file and `make fmt` rewrites line endings repo-wide. Verify formatting per edited file on an LF-converted copy instead: `sed 's/\r$//' <file> > $TEMP/chk.go && gofmt -l $TEMP/chk.go` (empty output = clean).
 
 ### Testing
 
@@ -44,6 +45,7 @@ Use these from repository root (`/Users/rain/Desktop/code/beancount-autoupdate/g
 - Add new tests package-locally under corresponding `internal/<pkg>/` directories.
 - HTTP upload ingest is available under `internal/httpingest` and is wired from `cmd/main.go` when `[http_server].enabled = true`.
 - `internal/ledgercli` wraps the `rledger` CLI (query seeds / check gate / `query_ledger` tool loop). The tool-exploration recognition path (`[llm].tools_enabled`, default false in 0.7.0) lives in `internal/llm/runbooking.go` + `internal/ledgercli/recognize.go`.
+- Ledger query invariants (0.7.2, verified against rledger): BQL cannot return `pad`/`balance` directives themselves—only balance padding postings. Therefore account keywords must match via entry-level `has_account()` (row-level `account ~` splits paired postings apart and the counter account becomes unretrievable), and `RenderSeeds` re-renders `(Padding inserted ...)` groups as `date pad A B` directive lines so narration-embedded historical balances never reach the LLM. `since`/`until` parsing goes through the single `bqlDateCond` helper (shared by toolhandler validation and `Query`), accepting `YYYY-MM` or `YYYY-MM-DD`, both ends inclusive.
 - `test/` holds manual e2e tests (`go test ./...` auto-skips without flags): `make test-e2e IMAGE=...` and `make test-regset` (real LLM calls; regression screenshots live in gitignored `testdata/regset/`).
 
 ### CI checks
