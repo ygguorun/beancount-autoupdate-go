@@ -89,11 +89,11 @@ func queryLedgerToolSpec() openai.ChatCompletionToolUnionParam {
 				},
 				"since": map[string]any{
 					"type":        "string",
-					"description": "可选。起始月 YYYY-MM（含）",
+					"description": "可选。起始日期 YYYY-MM 或 YYYY-MM-DD（含）",
 				},
 				"until": map[string]any{
 					"type":        "string",
-					"description": "可选。结束月 YYYY-MM（含）",
+					"description": "可选。结束日期 YYYY-MM 或 YYYY-MM-DD（含）",
 				},
 				"limit": map[string]any{
 					"type":        "integer",

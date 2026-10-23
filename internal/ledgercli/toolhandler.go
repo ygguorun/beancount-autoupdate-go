@@ -71,8 +71,10 @@ func (tl *ToolLoop) run(a toolArgs) string {
 		return errJSON("keywords 或 order_id 至少要提供一个")
 	}
 	for name, v := range map[string]string{"since": strings.TrimSpace(a.Since), "until": strings.TrimSpace(a.Until)} {
-		if v != "" && !bqlMonthRe.MatchString(v) {
-			return errJSON(name + " 需为 YYYY-MM 格式")
+		if v != "" {
+			if _, ok := bqlDateCond(name, v); !ok {
+				return errJSON(name + " 需为 YYYY-MM 或 YYYY-MM-DD")
+			}
 		}
 	}
 

@@ -134,21 +134,14 @@ func (e *Executor) Query(f QueryFilter) ([]Row, error) {
 		where = append(where, fmt.Sprintf("account ~ '%s'", p))
 	}
 	// 日期字面量必须不带引号（实测 `date >= '2026-05-01'` 报 cannot compare values）
-	if f.Since != "" {
-		if bqlMonthRe.MatchString(f.Since) {
-			where = append(where, fmt.Sprintf("date >= %s-01", f.Since))
-		} else {
-			logger.Warnf("忽略格式非法的 since（应为 YYYY-MM）: %q", f.Since)
+	for _, b := range []struct{ op, v string }{{"since", strings.TrimSpace(f.Since)}, {"until", strings.TrimSpace(f.Until)}} {
+		if b.v == "" {
+			continue
 		}
-	}
-	if f.Until != "" {
-		if bqlMonthRe.MatchString(f.Until) {
-			end, err := time.Parse("2006-01", f.Until)
-			if err == nil {
-				where = append(where, fmt.Sprintf("date < %s", end.AddDate(0, 1, 1).Format("2006-01-02")))
-			}
+		if c, ok := bqlDateCond(b.op, b.v); ok {
+			where = append(where, c)
 		} else {
-			logger.Warnf("忽略格式非法的 until（应为 YYYY-MM）: %q", f.Until)
+			logger.Warnf("忽略格式非法的 %s（应为 YYYY-MM 或 YYYY-MM-DD）: %q", b.op, b.v)
 		}
 	}
 
@@ -425,8 +418,37 @@ var (
 	// ponytail: 若将来需要精确匹配，改用 `-f json` 查询的转义透传并补测试。
 	bqlStripRe = regexp.MustCompile(`['"\\\r\n\t]`)
 	bqlMetaRe  = regexp.MustCompile(`[\^\$\.\*\+\?\(\)\[\]\{\}\|]`)
-	bqlMonthRe = regexp.MustCompile(`^\d{4}-\d{2}$`)
+	bqlDateRe  = regexp.MustCompile(`^(\d{4})-(\d{2})(?:-(\d{2}))?$`)
 )
+
+// bqlDateCond 把一个 since/until 取值（YYYY-MM 或 YYYY-MM-DD，两端含）翻译成 BQL
+// 日期边界子句；ok=false 表示格式非法（含 2026-02-30 这类归一化会静默漂移的假日）。
+// 月格式展开为整月：since 取当月 1 号，until 取次月 1 号（date < 上界）。
+func bqlDateCond(op, v string) (string, bool) {
+	m := bqlDateRe.FindStringSubmatch(v)
+	if m == nil {
+		return "", false
+	}
+	year, _ := strconv.Atoi(m[1])
+	month, _ := strconv.Atoi(m[2])
+	day := 1
+	if m[3] != "" {
+		day, _ = strconv.Atoi(m[3])
+	}
+	d := time.Date(year, time.Month(month), day, 0, 0, 0, 0, time.UTC)
+	if d.Year() != year || int(d.Month()) != month || d.Day() != day {
+		return "", false // time.Date 会把假日归一化到下月，必须回验
+	}
+	if op == "until" {
+		if m[3] == "" {
+			d = d.AddDate(0, 1, 0) // 月格式：含整月 → 次月 1 号上界
+		} else {
+			d = d.AddDate(0, 0, 1) // 日格式：含当天 → 次日 上界
+		}
+		return fmt.Sprintf("date < %s", d.Format("2006-01-02")), true
+	}
+	return fmt.Sprintf("date >= %s", d.Format("2006-01-02")), true
+}
 
 func sanitizeKeyword(k string) string {
 	k = bqlStripRe.ReplaceAllString(k, "")
