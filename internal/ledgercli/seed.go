@@ -64,8 +64,11 @@ func RenderSeeds(seeds []TxnSeed) string {
 
 	var b strings.Builder
 	for _, s := range seeds {
-		if strings.TrimSpace(s.Payee+s.Narration) == "" {
-			// 非交易指令（pad 等）：还原原始指令形态；指令本身不含金额，无余额泄出。
+		// 非交易指令（pad 等）与 balance 填充记录：还原指令形态 "日期 pad A B"。
+		// 指令不含金额，顺带挡住 "(Padding inserted for Balance of X)" 摘要
+		// 把历史余额泄给 LLM（脱敏承诺 rule 6）。
+		if p, n := strings.TrimSpace(s.Payee), strings.TrimSpace(s.Narration); p == "" &&
+			(n == "" || strings.HasPrefix(n, "(Padding inserted")) {
 			directive := "entry"
 			if len(s.Postings) > 0 {
 				switch s.Postings[0].Flag {
