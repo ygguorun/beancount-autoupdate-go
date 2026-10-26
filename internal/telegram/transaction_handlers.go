@@ -370,8 +370,12 @@ func (b *Bot) confirmTransaction(userID int, transactionID string) {
 		maskPayee(data.Payee),
 	)
 	if gitErr != nil {
-		response = fmt.Sprintf("⚠️ 交易已写入本地账本，但 Git 同步失败\n\n🆔 交易ID: %s\n📅 日期: %s\n🏷️ 对象: %s\n\n请检查日志并手动同步 Git。",
-			shortTransactionID(transactionID), data.Date, maskPayee(data.Payee))
+		reason := gitErr.Error()
+		if r := []rune(reason); len(r) > 200 {
+			reason = string(r[:200]) + "…"
+		}
+		response = fmt.Sprintf("⚠️ 交易已写入本地账本，但 Git 同步失败：%s\n\n🆔 交易ID: %s\n📅 日期: %s\n🏷️ 对象: %s\n\n交易已在本地提交，请检查网络或 Git 状态后手动同步。",
+			reason, shortTransactionID(transactionID), data.Date, maskPayee(data.Payee))
 	}
 	b.sendMessageWithNilKeyboard(userID, response)
 }

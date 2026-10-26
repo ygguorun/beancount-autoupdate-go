@@ -22,6 +22,9 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 )
 
+// pullCooldown 一次成功拉取后，PullChanges 在此时间内直接跳过网络往返（含 AlreadyUpToDate）
+const pullCooldown = 60 * time.Second
+
 // Manager Git 管理器
 type Manager struct {
 	repoPath            string
@@ -30,6 +33,7 @@ type Manager struct {
 	commitMessagePrefix string
 	autoPush            bool
 	repo                *git.Repository
+	lastPullAt          time.Time
 	mu                  sync.Mutex
 }
 
@@ -429,19 +433,6 @@ func (m *Manager) PushChanges() (bool, error) {
 	remote := remotes[0]
 	logger.Infof("远程仓库: %s - %s", remote.Config().Name, remote.Config().URLs)
 
-	// 先拉取以避免冲突
-	logger.Infof("先拉取远程更改以避免冲突...")
-	pullSuccess, pullErr := m.pullChangesLocked()
-	switch {
-	case pullErr != nil:
-		logger.Errorf("拉取远程更改失败: %v", pullErr)
-		// 继续尝试推送
-	case pullSuccess:
-		logger.Infof("拉取远程更改成功")
-	default:
-		logger.Infof("没有远程更改需要拉取")
-	}
-
 	// 获取当前分支
 	head, err := m.repo.Head()
 	if err != nil {
@@ -464,19 +455,39 @@ func (m *Manager) PushChanges() (bool, error) {
 
 	logger.Infof("推送配置: RemoteName=%s, RefSpec=%v", pushOptions.RemoteName, pushOptions.RefSpecs)
 
-	if err := remote.Push(pushOptions); err != nil {
+	err = remote.Push(pushOptions)
+	if err != nil && isNonFastForwardError(err) {
+		// 远端领先被拒绝。注意：go-git 的 Pull 仅支持快进，只能恢复"本地无独有提交"的场景，真分叉仍会失败
+		logger.Warnf("Git 推送被拒绝（非快进），快进拉取后重试: %v", err)
+		if _, pullErr := m.pullChangesLocked(); pullErr != nil {
+			logger.Errorf("拉取远程更改失败: %v", pullErr)
+			return false, fmt.Errorf("failed to push: %w (recovery pull failed: %w)", err, pullErr)
+		}
+		err = remote.Push(pushOptions)
+	}
+	if errors.Is(err, git.NoErrAlreadyUpToDate) {
+		// refspec 无需变更（本地与远端已一致），go-git 以错误形式返回，实为同步成功
+		err = nil
+	}
+	if err != nil {
 		logger.Errorf("Git 推送失败: %v", err)
 		return false, fmt.Errorf("failed to push: %w", err)
 	}
 
 	logger.Infof("Git 推送成功")
+	m.lastPullAt = time.Now() // 推送成功即远端分支与本地一致，等价于刚拉取过
 	return true, nil
 }
 
-// PullChanges 拉取远程更改
+// PullChanges 拉取远程更改（距上次成功拉取不足 pullCooldown 时跳过网络往返）
 func (m *Manager) PullChanges() (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if !m.lastPullAt.IsZero() && time.Since(m.lastPullAt) < pullCooldown {
+		logger.Infof("git-op=pull repo=%s 跳过：距上次成功拉取不足 %v", m.repoPath, pullCooldown)
+		return false, nil
+	}
 
 	return m.pullChangesLocked()
 }
@@ -517,12 +528,14 @@ func (m *Manager) pullChangesLocked() (bool, error) {
 		// 没有更新或错误
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			logger.Infof("远程仓库已是最新")
+			m.lastPullAt = time.Now()
 			return false, nil
 		}
 		logger.Errorf("拉取失败: %v", err)
 		return false, err
 	}
 
+	m.lastPullAt = time.Now()
 	logger.Infof("拉取成功")
 	return true, nil
 }
@@ -549,4 +562,16 @@ func isPackfileNotFound(err error) bool {
 	}
 
 	return strings.Contains(strings.ToLower(err.Error()), "packfile not found")
+}
+
+// isNonFastForwardError 判断推送是否因远端领先被拒绝（go-git 客户端校验或远端 rejected 报告）
+func isNonFastForwardError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "non-fast-forward") ||
+		strings.Contains(msg, "fetch first") ||
+		strings.Contains(msg, "stale info")
 }
