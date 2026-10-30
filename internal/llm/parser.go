@@ -145,7 +145,7 @@ func (p *Parser) ParseImageWithHistory(
 
 	switch p.protocol {
 	case llmRequestProtocolResponses:
-		transactionData, newHistory, err = p.callWithResponsesStructuredOutput(
+		transactionData, newHistory, err = p.callWithResponsesJSONMode(
 			payload.responseInput,
 			history,
 			userPromptForHistory,
@@ -153,26 +153,13 @@ func (p *Parser) ParseImageWithHistory(
 			imageMIMEType,
 		)
 	default:
-		// chat/completions 保持现有行为：先 Structured Outputs，再降级 JSON mode
 		transactionData, newHistory, err = p.callChatCompletion(
 			payload.chatMessages,
 			history,
 			userPromptForHistory,
 			imageBase64ForHistory,
 			imageMIMEType,
-			false,
 		)
-		if err != nil && isStructuredOutputUnsupported(err) {
-			logger.Warnf("Structured Outputs failed: %v, falling back to JSON mode", err)
-			transactionData, newHistory, err = p.callChatCompletion(
-				payload.chatMessages,
-				history,
-				userPromptForHistory,
-				imageBase64ForHistory,
-				imageMIMEType,
-				true,
-			)
-		}
 	}
 	if err != nil {
 		// 解析失败时返回尝试后的历史（可能包含错误输出与错误提示），供上层保留供引导重试
@@ -455,7 +442,7 @@ func imageDataURL(mimeType, base64Image string) string {
 	return fmt.Sprintf("data:%s;base64,%s", mimeType, base64Image)
 }
 
-func (p *Parser) callWithResponsesStructuredOutput(
+func (p *Parser) callWithResponsesJSONMode(
 	input responses.ResponseInputParam,
 	history []beancount.ConversationMessage,
 	prompt, imageBase64 string,
@@ -472,26 +459,21 @@ func (p *Parser) callWithResponsesStructuredOutput(
 		},
 		Text: responses.ResponseTextConfigParam{
 			Format: responses.ResponseFormatTextConfigUnionParam{
-				OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
-					Name:        "transaction_data",
-					Description: openai.String("Beancount transaction data"),
-					Schema:      generateTransactionSchema(),
-					Strict:      openai.Bool(true),
-				},
+				OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
 			},
 		},
 	})
 	if err != nil {
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
-	logResponsesUsage("交易/Responses Structured Output", time.Since(t0), resp.Usage)
+	logResponsesUsage("交易/Responses JSON Mode", time.Since(t0), resp.Usage)
 
 	content := strings.TrimSpace(resp.OutputText())
 	if content == "" {
 		return nil, history, fmt.Errorf("empty response from LLM")
 	}
 
-	logger.Infof("LLM Response (Responses Structured Output): %s", content)
+	logger.Infof("LLM Response (Responses JSON Mode): %s", content)
 
 	transactionData, err := p.parseResponse(content)
 	if err != nil {
@@ -502,44 +484,28 @@ func (p *Parser) callWithResponsesStructuredOutput(
 	return transactionData, newHistory, nil
 }
 
-// callChatCompletion 调用 chat/completions，jsonMode=false 用 Structured Outputs，true 降级为普通 JSON 模式
+// callChatCompletion 调用 chat/completions，使用 JSON 模式（各 provider 通用；
+// 输出结构由提示词中的 schema 文本约束）。
 func (p *Parser) callChatCompletion(
 	messages []openai.ChatCompletionMessageParamUnion,
 	history []beancount.ConversationMessage,
 	prompt, imageBase64, imageMIMEType string,
-	jsonMode bool,
 ) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
 	defer cancel()
 	t0 := time.Now()
 
-	label := "Structured Output"
-	responseFormat := openai.ChatCompletionNewParamsResponseFormatUnion{
-		OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
-			JSONSchema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
-				Name:        "transaction_data",
-				Description: openai.String("Beancount transaction data"),
-				Schema:      generateTransactionSchema(),
-				Strict:      openai.Bool(true),
-			},
-		},
-	}
-	if jsonMode {
-		label = "JSON Mode"
-		responseFormat = openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
-		}
-	}
-
 	completion, err := p.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Model:          p.model,
-		Messages:       messages,
-		ResponseFormat: responseFormat,
+		Model:    p.model,
+		Messages: messages,
+		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
+			OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
+		},
 	})
 	if err != nil {
 		return nil, history, fmt.Errorf("API call failed: %w", err)
 	}
-	logLLMUsage("交易/"+label, time.Since(t0),
+	logLLMUsage("交易/JSON Mode", time.Since(t0),
 		completion.Usage.PromptTokens, completion.Usage.CompletionTokens, completion.Usage.PromptTokensDetails.CachedTokens)
 
 	if len(completion.Choices) == 0 {
@@ -550,7 +516,7 @@ func (p *Parser) callChatCompletion(
 		return nil, history, fmt.Errorf("empty response from LLM")
 	}
 
-	logger.Infof("LLM Response (%s): %s", label, content)
+	logger.Infof("LLM Response (JSON Mode): %s", content)
 
 	transactionData, err := p.parseResponse(content)
 	if err != nil {
@@ -559,16 +525,6 @@ func (p *Parser) callChatCompletion(
 
 	newHistory := p.updateHistory(history, prompt, imageBase64, imageMIMEType, content)
 	return transactionData, newHistory, nil
-}
-
-// isStructuredOutputUnsupported 检查错误是否表示不支持 Structured Outputs
-func isStructuredOutputUnsupported(err error) bool {
-	errStr := strings.ToLower(err.Error())
-	return strings.Contains(errStr, "unsupported") ||
-		strings.Contains(errStr, "not supported") ||
-		strings.Contains(errStr, "invalid_request") ||
-		strings.Contains(errStr, "schema") ||
-		strings.Contains(errStr, "response_format")
 }
 
 // updateHistory 更新对话历史
@@ -606,56 +562,6 @@ func (p *Parser) buildFailedParseHistory(
 			parseErr,
 		),
 	})
-}
-
-// generateTransactionSchema 生成 TransactionData 的 JSON Schema
-func generateTransactionSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]any{
-			"datetime":  map[string]string{"type": "string"},
-			"flag":      map[string]string{"type": "string"},
-			"payee":     map[string]string{"type": "string"},
-			"narration": map[string]string{"type": "string"},
-			"tags": map[string]any{
-				"type":  "array",
-				"items": map[string]string{"type": "string"},
-			},
-			"postings": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type":                 "object",
-					"additionalProperties": false,
-					"properties": map[string]any{
-						"account":  map[string]string{"type": "string"},
-						"amount":   map[string]string{"type": "string"},
-						"currency": map[string]string{"type": "string"},
-						"flag":     map[string]string{"type": "string"},
-					},
-					"required": []string{"account", "amount", "currency", "flag"},
-				},
-			},
-			"order_id": map[string]string{"type": "string"},
-			"extra": map[string]any{
-				"type": "array",
-				"items": map[string]any{
-					"type":                 "object",
-					"additionalProperties": false,
-					"properties": map[string]any{
-						"k": map[string]string{"type": "string"},
-						"v": map[string]string{"type": "string"},
-					},
-					"required": []string{"k", "v"},
-				},
-			},
-			"special_directives": map[string]any{
-				"type":  "array",
-				"items": map[string]string{"type": "string"},
-			},
-		},
-		"required": []string{"datetime", "flag", "payee", "narration", "tags", "postings", "order_id", "extra", "special_directives"},
-	}
 }
 
 type transactionDataRaw struct {

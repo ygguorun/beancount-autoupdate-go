@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.3 (2026-10-30)
+
+### 变更
+
+- LLM 识别请求的 `response_format` 统一改为 `json_object`（普通识别、工具探索、Responses 三条路径），移除 Structured Outputs（`json_schema` strict）与降级重试逻辑：`json_schema` 在 DeepSeek 等兼容网关上不可用（400 "This response_format type is unavailable now"），且工具探索路径原本没有降级。输出结构约束由提示词模板中的 schema 文本承担（此前降级路径已长期实测可行）。
+- Git 同步：pull 增加 60s 冷却去重；push 改为非快进拒绝后快进重试；同步失败提示附带原因。
+
 ## 0.7.2 (2026-10-23)
 
 修复工具探索识别中"账本对账史不可检索"导致的科目误选（如基金快照 pad 进 `Equity:*` 而非账本惯用的 `Income:FinanceAndInvestment:股票基金`），并消除探索回合的无谓损耗。识别提示词模板零改动。

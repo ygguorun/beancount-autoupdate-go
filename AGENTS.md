@@ -138,7 +138,7 @@ Follow existing patterns in this repo first; these rules codify observed convent
 ### 4.10 API/IO boundaries
 
 - For external APIs (Telegram, OpenAI, WebDAV, Git remotes), keep timeouts explicit.
-- Handle graceful fallbacks where established (e.g., Structured Output -> JSON mode).
+- LLM JSON output always uses `response_format: json_object` (never `json_schema`/Structured Outputs: unavailable on DeepSeek and some compatible gateways; output shape is constrained by the schema text embedded in prompt templates).
 - Preserve compatibility behavior unless task explicitly removes it.
 
 ### 4.11 Modern Go syntax

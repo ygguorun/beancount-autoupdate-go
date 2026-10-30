@@ -161,7 +161,6 @@ func (p *Parser) runToolLoop(
 	if p.protocol != llmRequestProtocolChatCompletions {
 		return nil, hist, fmt.Errorf("tools 探索循环目前仅支持 chat 协议（responses 未实现）")
 	}
-	schema := generateTransactionSchema()
 	rounds, queried, nudged, echoed := 0, false, false, false
 
 	failParse := func(content string, parseErr error) (*beancount.TransactionData, []beancount.ConversationMessage, error) {
@@ -177,7 +176,7 @@ func (p *Parser) runToolLoop(
 	}
 
 	for {
-		content, toolCalls, callErr := p.callBookingRound(msgs, schema, rounds)
+		content, toolCalls, callErr := p.callBookingRound(msgs, rounds)
 		if callErr != nil {
 			return nil, hist, callErr
 		}
@@ -227,7 +226,7 @@ func (p *Parser) runToolLoop(
 	logger.Warnf("工具探索达到 %d 回合上限，追加收敛指令", rounds)
 	msgs = append(msgs, openai.UserMessage("探索回合已达上限。请立即基于已有信息只输出最终交易 JSON，不要再调用工具。"))
 	for attempt := 0; attempt < 2; attempt++ {
-		content, calls, callErr := p.callBookingRound(msgs, schema, rounds)
+		content, calls, callErr := p.callBookingRound(msgs, rounds)
 		if callErr != nil {
 			return nil, hist, callErr
 		}
@@ -249,7 +248,6 @@ func (p *Parser) runToolLoop(
 // 强制收敛也靠会话尾部的停机指令实现，不改请求形态。
 func (p *Parser) callBookingRound(
 	msgs []openai.ChatCompletionMessageParamUnion,
-	schema map[string]any,
 	round int,
 ) (string, []openai.ChatCompletionMessageToolCallUnion, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), p.timeout)
@@ -260,14 +258,7 @@ func (p *Parser) callBookingRound(
 		Model:    p.model,
 		Messages: msgs,
 		ResponseFormat: openai.ChatCompletionNewParamsResponseFormatUnion{
-			OfJSONSchema: &openai.ResponseFormatJSONSchemaParam{
-				JSONSchema: openai.ResponseFormatJSONSchemaJSONSchemaParam{
-					Name:        "transaction_data",
-					Description: openai.String("beancount transaction object"),
-					Schema:      schema,
-					Strict:      openai.Bool(true),
-				},
-			},
+			OfJSONObject: &openai.ResponseFormatJSONObjectParam{},
 		},
 		Tools: []openai.ChatCompletionToolUnionParam{queryLedgerToolSpec()},
 	}

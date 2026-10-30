@@ -180,56 +180,6 @@ func TestParseResponse(t *testing.T) {
 	}
 }
 
-func TestGenerateTransactionSchema(t *testing.T) {
-	schema := generateTransactionSchema()
-
-	if schema["additionalProperties"] != false {
-		t.Fatalf("root additionalProperties must be false")
-	}
-
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("properties type assertion failed")
-	}
-
-	postings, ok := properties["postings"].(map[string]any)
-	if !ok {
-		t.Fatalf("postings schema missing")
-	}
-	postingsItems, ok := postings["items"].(map[string]any)
-	if !ok {
-		t.Fatalf("postings items schema missing")
-	}
-	if postingsItems["additionalProperties"] != false {
-		t.Fatalf("postings item additionalProperties must be false")
-	}
-
-	extra, ok := properties["extra"].(map[string]any)
-	if !ok {
-		t.Fatalf("extra schema missing")
-	}
-	if extra["type"] != "array" {
-		t.Fatalf("extra type must be array")
-	}
-	extraItems, ok := extra["items"].(map[string]any)
-	if !ok {
-		t.Fatalf("extra items schema missing")
-	}
-	if extraItems["additionalProperties"] != false {
-		t.Fatalf("extra item additionalProperties must be false")
-	}
-	extraItemProps, ok := extraItems["properties"].(map[string]any)
-	if !ok {
-		t.Fatalf("extra item properties missing")
-	}
-	if _, ok := extraItemProps["k"]; !ok {
-		t.Fatalf("extra item missing key 'k'")
-	}
-	if _, ok := extraItemProps["v"]; !ok {
-		t.Fatalf("extra item missing key 'v'")
-	}
-}
-
 func TestParseTime(t *testing.T) {
 	p := &Parser{}
 
@@ -277,28 +227,6 @@ func TestParseTime(t *testing.T) {
 			t.Fatalf("expected non-zero fallback time")
 		}
 	})
-}
-
-func TestIsStructuredOutputUnsupported(t *testing.T) {
-	tests := []struct {
-		name   string
-		errMsg string
-		expect bool
-	}{
-		{name: "unsupported keyword", errMsg: "feature unsupported by model", expect: true},
-		{name: "schema keyword", errMsg: "invalid schema for response_format", expect: true},
-		{name: "generic error", errMsg: "network timeout", expect: false},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			err := &testErr{msg: tc.errMsg}
-			got := isStructuredOutputUnsupported(err)
-			if got != tc.expect {
-				t.Fatalf("unexpected result: got %v want %v", got, tc.expect)
-			}
-		})
-	}
 }
 
 func TestImageDataURLPreservesMIMEType(t *testing.T) {
@@ -439,14 +367,6 @@ func TestBuildResponseInput(t *testing.T) {
 			t.Fatalf("unexpected guidance content")
 		}
 	})
-}
-
-type testErr struct {
-	msg string
-}
-
-func (e *testErr) Error() string {
-	return e.msg
 }
 
 func TestParseResponseNormalization(t *testing.T) {
