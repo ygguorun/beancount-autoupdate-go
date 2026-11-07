@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### 修复
+
+- Git 同步在进程常驻期间仓库被外部 `git gc`/repack 后持续报 `packfile not found`：go-git 打开仓库时会缓存 pack 文件列表，pack 文件被重命名/删除后 pull/push 读取对象失败。新增 `runWithRepoReopen`，pull、push、commit（暂存与提交）报 `packfile not found` 时重开仓库并重试一次；push 的 `remote` 句柄改为每次尝试时从当前仓库重新获取，避免重开后仍使用旧 storage。
+
 ## 0.7.3 (2026-10-30)
 
 ### 变更
