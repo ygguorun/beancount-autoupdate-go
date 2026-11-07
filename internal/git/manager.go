@@ -317,19 +317,23 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 		return false, fmt.Errorf("repository not initialized")
 	}
 
-	// 获取 Worktree
+	// 获取 Worktree 并检查是否有更改（Status 读取 HEAD commit/tree，同样可能踩过期 pack 缓存，纳入重开重试）
 	logger.Infof("获取 Worktree...")
-	worktree, err := m.repo.Worktree()
-	if err != nil {
-		logger.Errorf("获取 Worktree 失败: %v", err)
-		return false, err
-	}
-
-	// 检查是否有更改
 	logger.Infof("检查是否有更改...")
-	status, err := worktree.Status()
+	var status git.Status
+	err := m.runWithRepoReopen("commit-status", func() error {
+		wt, err := m.repo.Worktree()
+		if err != nil {
+			logger.Errorf("获取 Worktree 失败: %v", err)
+			return err
+		}
+		status, err = wt.Status()
+		if err != nil {
+			logger.Errorf("获取仓库状态失败: %v", err)
+		}
+		return err
+	})
 	if err != nil {
-		logger.Errorf("获取仓库状态失败: %v", err)
 		return false, err
 	}
 
@@ -349,26 +353,17 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 
 	// 添加所有更改
 	logger.Infof("添加所有更改到暂存区...")
-	if _, err := worktree.Add("."); err != nil {
-		if isPackfileNotFound(err) {
-			logger.Warnf("git-op=commit repo=%s 首次暂存失败，尝试重新打开仓库后重试: %v", m.repoPath, err)
-
-			worktree, err = m.reopenRepoAndWorktreeLocked()
-			if err != nil {
-				logger.Errorf("git-op=commit repo=%s 重新打开仓库失败: %v", m.repoPath, err)
-				return false, fmt.Errorf("failed to reopen repo after add error: %w", err)
-			}
-
-			if _, err = worktree.Add("."); err == nil {
-				logger.Infof("git-op=commit repo=%s 重新打开仓库后暂存成功", m.repoPath)
-			} else {
-				logger.Errorf("git-op=commit repo=%s 重试暂存仍然失败: %v", m.repoPath, err)
-				return false, fmt.Errorf("failed to add files after retry: %w", err)
-			}
-		} else {
-			logger.Errorf("添加文件到暂存区失败: %v", err)
-			return false, fmt.Errorf("failed to add files: %w", err)
+	err = m.runWithRepoReopen("commit-add", func() error {
+		wt, err := m.repo.Worktree()
+		if err != nil {
+			return err
 		}
+		_, err = wt.Add(".")
+		return err
+	})
+	if err != nil {
+		logger.Errorf("添加文件到暂存区失败: %v", err)
+		return false, fmt.Errorf("failed to add files: %w", err)
 	}
 	logger.Infof("文件已添加到暂存区")
 
@@ -382,12 +377,20 @@ func (m *Manager) CommitChanges(message string) (bool, error) {
 
 	// 提交
 	logger.Infof("执行 Git 提交...")
-	commitHash, err := worktree.Commit(commitMessage, &git.CommitOptions{
-		Author: &object.Signature{
-			Name:  "Beancount AutoUpdate",
-			Email: "autoupdate@beancount.local",
-			When:  time.Now(),
-		},
+	var commitHash plumbing.Hash
+	err = m.runWithRepoReopen("commit", func() error {
+		wt, err := m.repo.Worktree()
+		if err != nil {
+			return err
+		}
+		commitHash, err = wt.Commit(commitMessage, &git.CommitOptions{
+			Author: &object.Signature{
+				Name:  "Beancount AutoUpdate",
+				Email: "autoupdate@beancount.local",
+				When:  time.Now(),
+			},
+		})
+		return err
 	})
 	if err != nil {
 		logger.Errorf("Git 提交失败: %v", err)
@@ -418,19 +421,17 @@ func (m *Manager) PushChanges() (bool, error) {
 		return false, fmt.Errorf("repository not initialized")
 	}
 
-	remotes, err := m.repo.Remotes()
+	// 与实际推送目标一致：按名字解析 origin（与 pushOptions.RemoteName 及 pullChangesLocked 保持相同语义）
+	remote, err := m.repo.Remote("origin")
 	if err != nil {
+		if errors.Is(err, git.ErrRemoteNotFound) {
+			logger.Infof("没有配置远程仓库")
+			return false, nil
+		}
 		logger.Errorf("获取远程仓库失败: %v", err)
 		return false, err
 	}
 
-	if len(remotes) == 0 {
-		logger.Infof("没有配置远程仓库")
-		return false, nil
-	}
-
-	// 获取远程仓库
-	remote := remotes[0]
 	logger.Infof("远程仓库: %s - %s", remote.Config().Name, remote.Config().URLs)
 
 	// 获取当前分支
@@ -455,7 +456,20 @@ func (m *Manager) PushChanges() (bool, error) {
 
 	logger.Infof("推送配置: RemoteName=%s, RefSpec=%v", pushOptions.RemoteName, pushOptions.RefSpecs)
 
-	err = remote.Push(pushOptions)
+	// remote 在每次尝试内从当前 m.repo 重新获取，避免仓库重开后仍使用旧的 storage 句柄
+	attemptPush := func() error {
+		remote, err := m.repo.Remote(pushOptions.RemoteName)
+		if err != nil {
+			return err
+		}
+		if err := remote.Push(pushOptions); err != nil && !errors.Is(err, git.NoErrAlreadyUpToDate) {
+			return err
+		}
+		// refspec 无需变更（本地与远端已一致），go-git 以错误形式返回，实为同步成功
+		return nil
+	}
+
+	err = m.runWithRepoReopen("push", attemptPush)
 	if err != nil && isNonFastForwardError(err) {
 		// 远端领先被拒绝。注意：go-git 的 Pull 仅支持快进，只能恢复"本地无独有提交"的场景，真分叉仍会失败
 		logger.Warnf("Git 推送被拒绝（非快进），快进拉取后重试: %v", err)
@@ -463,11 +477,7 @@ func (m *Manager) PushChanges() (bool, error) {
 			logger.Errorf("拉取远程更改失败: %v", pullErr)
 			return false, fmt.Errorf("failed to push: %w (recovery pull failed: %w)", err, pullErr)
 		}
-		err = remote.Push(pushOptions)
-	}
-	if errors.Is(err, git.NoErrAlreadyUpToDate) {
-		// refspec 无需变更（本地与远端已一致），go-git 以错误形式返回，实为同步成功
-		err = nil
+		err = m.runWithRepoReopen("push", attemptPush)
 	}
 	if err != nil {
 		logger.Errorf("Git 推送失败: %v", err)
@@ -519,12 +529,14 @@ func (m *Manager) pullChangesLocked() (bool, error) {
 		Auth:          m.getAuth(),
 	}
 
-	worktree, err := m.repo.Worktree()
+	err = m.runWithRepoReopen("pull", func() error {
+		worktree, err := m.repo.Worktree()
+		if err != nil {
+			return err
+		}
+		return worktree.Pull(pullOptions)
+	})
 	if err != nil {
-		return false, err
-	}
-
-	if err := worktree.Pull(pullOptions); err != nil {
 		// 没有更新或错误
 		if errors.Is(err, git.NoErrAlreadyUpToDate) {
 			logger.Infof("远程仓库已是最新")
@@ -554,6 +566,23 @@ func (m *Manager) reopenRepoAndWorktreeLocked() (*git.Worktree, error) {
 	}
 
 	return worktree, nil
+}
+
+// runWithRepoReopen 执行 git 操作，若因过期 pack 缓存报 packfile not found（进程常驻期间仓库被外部 gc/repack）则重开仓库重试一次。
+// action 须在闭包内从 m.repo 现场获取 worktree/remote，以拿到重开后的新句柄。调用方必须已持有 m.mu。
+func (m *Manager) runWithRepoReopen(op string, action func() error) error {
+	err := action()
+	if err == nil || !isPackfileNotFound(err) {
+		return err
+	}
+
+	logger.Warnf("git-op=%s repo=%s packfile not found，重开仓库后重试: %v", op, m.repoPath, err)
+	if _, reopenErr := m.reopenRepoAndWorktreeLocked(); reopenErr != nil {
+		logger.Errorf("git-op=%s repo=%s 重新打开仓库失败: %v", op, m.repoPath, reopenErr)
+		return fmt.Errorf("%w (reopen failed: %w)", err, reopenErr)
+	}
+
+	return action()
 }
 
 func isPackfileNotFound(err error) bool {
